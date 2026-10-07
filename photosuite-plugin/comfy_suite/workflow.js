@@ -236,8 +236,9 @@
       if (pixels) {
         // The region as context (a reference latent), its latent as the start, the selection
         // as a noise mask: Flux 2 repaints the masked part consistently with the rest.
-        if (style.flux2_reference !== false) {
-          var refs = addReference(g, m, positive, negative, pixels);
+        if (style.flux2_reference !== false || req.reference) {
+          var refPixels = req.reference ? g.add("LoadImage", { image: req.reference }, "Reference").out() : pixels;
+          var refs = addReference(g, m, positive, negative, refPixels);
           positive = refs[0]; negative = refs[1];
         }
         latent = g.add("VAEEncode", { pixels: pixels, vae: m.vae }).out();

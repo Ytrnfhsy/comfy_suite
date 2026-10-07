@@ -97,6 +97,103 @@
     return out;
   }
 
+  /* ---- pre-filling the area to repaint (pure: RGBA bytes in, RGBA bytes out) ----
+     What sits under the mask steers the result even at full strength (the latent the sampler
+     starts from, inpaint conditioning, Flux 2's reference), so each inpaint mode prepares it
+     differently, as Krita's AI plugin does. `weight` is 0..255 per pixel: 255 = repaint. */
+
+  /* Push-pull fill: the unknown pixels take colours diffused in from the known ones, through
+     an image pyramid, like a coarse Navier-Stokes inpaint. Handles any hole size. */
+  function pushPull(rgba, w, h, known) {
+    var levels = [];
+    var cur = { w: w, h: h, c: new Float32Array(w * h * 3), k: new Float32Array(w * h) };
+    for (var i = 0; i < w * h; i++) {
+      var k = known[i];
+      cur.k[i] = k;
+      cur.c[i * 3] = rgba[i * 4] * k; cur.c[i * 3 + 1] = rgba[i * 4 + 1] * k; cur.c[i * 3 + 2] = rgba[i * 4 + 2] * k;
+    }
+    levels.push(cur);
+    while (cur.w > 1 || cur.h > 1) {
+      var nw = Math.max(1, Math.ceil(cur.w / 2)), nh = Math.max(1, Math.ceil(cur.h / 2));
+      var nxt = { w: nw, h: nh, c: new Float32Array(nw * nh * 3), k: new Float32Array(nw * nh) };
+      for (var y = 0; y < cur.h; y++) for (var x = 0; x < cur.w; x++) {
+        var si = y * cur.w + x, di = (y >> 1) * nw + (x >> 1);
+        nxt.k[di] += cur.k[si];
+        nxt.c[di * 3] += cur.c[si * 3]; nxt.c[di * 3 + 1] += cur.c[si * 3 + 1]; nxt.c[di * 3 + 2] += cur.c[si * 3 + 2];
+      }
+      levels.push(nxt);
+      cur = nxt;
+    }
+    // Pull: normalise each level, filling its holes from the coarser one.
+    var coarse = null;
+    for (var l = levels.length - 1; l >= 0; l--) {
+      var L = levels[l], col = new Float32Array(L.w * L.h * 3);
+      for (var j = 0; j < L.w * L.h; j++) {
+        var kk = Math.min(1, L.k[j]);
+        var up = coarse ? ((j / L.w | 0) >> 1) * coarse.w + ((j % L.w) >> 1) : -1;
+        for (var ch = 0; ch < 3; ch++) {
+          var own = L.k[j] > 0 ? L.c[j * 3 + ch] / L.k[j] : 0;
+          var from = up >= 0 ? coarse.col[up * 3 + ch] : own;
+          col[j * 3 + ch] = own * kk + from * (1 - kk);
+        }
+      }
+      coarse = { w: L.w, h: L.h, col: col };
+    }
+    var out = new Uint8ClampedArray(rgba.length);
+    for (var p = 0; p < w * h; p++) {
+      out[p * 4] = coarse.col[p * 3]; out[p * 4 + 1] = coarse.col[p * 3 + 1]; out[p * 4 + 2] = coarse.col[p * 3 + 2]; out[p * 4 + 3] = 255;
+    }
+    return out;
+  }
+
+  function blurRgba(rgba, w, h, radius) {
+    var out = new Uint8ClampedArray(rgba.length), ch = new Uint8Array(w * h);
+    for (var c = 0; c < 3; c++) {
+      for (var i = 0; i < w * h; i++) ch[i] = rgba[i * 4 + c];
+      var b = boxBlur(boxBlur(ch, w, h, radius), w, h, radius);
+      for (var j = 0; j < w * h; j++) out[j * 4 + c] = b[j];
+    }
+    for (var k = 0; k < w * h; k++) out[k * 4 + 3] = 255;
+    return out;
+  }
+
+  /* mode: "blur" (fill), "border" (expand, remove object), "neutral" (add object,
+     replace background), "green" (Flux 2 edit prompts: "fill the green spaces"). Pixels that are
+     transparent count as unknown too (an enlarged canvas). */
+  function prefill(rgba, w, h, weight, mode) {
+    var known = new Float32Array(w * h), i;
+    for (i = 0; i < w * h; i++) known[i] = (1 - weight[i] / 255) * (rgba[i * 4 + 3] / 255);
+    var fill;
+    if (mode === "neutral") {
+      fill = new Uint8ClampedArray(rgba.length).fill(128);
+    } else if (mode === "green") {
+      fill = new Uint8ClampedArray(rgba.length);
+      for (i = 0; i < w * h; i++) { fill[i * 4 + 1] = 255; }
+    } else {
+      fill = pushPull(rgba, w, h, known);
+      var radius = Math.max(2, Math.round(Math.min(w, h) / (mode === "blur" ? 16 : 40)));
+      fill = blurRgba(fill, w, h, radius);
+    }
+    var out = new Uint8ClampedArray(rgba.length);
+    for (i = 0; i < w * h; i++) {
+      var k = mode === "green" ? (weight[i] > 127 || rgba[i * 4 + 3] < 128 ? 0 : 1) : known[i];
+      for (var c = 0; c < 3; c++) out[i * 4 + c] = Math.round(rgba[i * 4 + c] * k + fill[i * 4 + c] * (1 - k));
+      out[i * 4 + 3] = 255;
+    }
+    return out;
+  }
+
+  /* Share of the masked area that is transparent: an enlarged canvas waiting to be expanded. */
+  function transparentShare(rgba, w, h, weight) {
+    var masked = 0, empty = 0;
+    for (var i = 0; i < w * h; i++) {
+      if (weight[i] < 128) continue;
+      masked++;
+      if (rgba[i * 4 + 3] < 16) empty++;
+    }
+    return masked ? empty / masked : 0;
+  }
+
   /* ---- canvas helpers (browser only) ---- */
 
   function canvas(w, h) {
@@ -173,6 +270,13 @@
     return c;
   }
 
+  function rgbaOf(c) { return c.getContext("2d").getImageData(0, 0, c.width, c.height).data; }
+  function fromRgba(rgba, w, h) {
+    var c = canvas(w, h), ctx = c.getContext("2d");
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
+    return c;
+  }
+
   function toBlob(c) {
     return new Promise(function (resolve, reject) {
       c.toBlob(function (b) { if (b) resolve(b); else reject(new Error("PNG encoding failed")); }, "image/png");
@@ -182,7 +286,8 @@
   CS.imaging = {
     rect: rect, clampRect: clampRect, multipleOf: multipleOf, generationExtent: generationExtent,
     inpaintContext: inpaintContext, dilate: dilate, boxBlur: boxBlur, prepareMask: prepareMask,
-    maskForRegion: maskForRegion, canvas: canvas, decode: decode, crop: crop, resize: resize,
-    flatten: flatten, maskCanvas: maskCanvas, withAlpha: withAlpha, toBlob: toBlob
+    maskForRegion: maskForRegion, pushPull: pushPull, prefill: prefill, transparentShare: transparentShare, canvas: canvas, decode: decode, crop: crop, resize: resize,
+    flatten: flatten, maskCanvas: maskCanvas, withAlpha: withAlpha, toBlob: toBlob,
+    rgbaOf: rgbaOf, fromRgba: fromRgba
   };
 })(typeof window !== "undefined" ? (window.CS = window.CS || {}) : (globalThis.CS = globalThis.CS || {}));

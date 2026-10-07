@@ -5,8 +5,8 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 
 const dir = new URL("../../photosuite-plugin/comfy_suite/", import.meta.url);
-for (const f of ["i18n.js", "styles.js", "workflow.js", "imaging.js"]) vm.runInThisContext(readFileSync(new URL(f, dir), "utf8"), { filename: f });
-const { styles, workflow: W, imaging: I } = globalThis.CS;
+for (const f of ["i18n.js", "styles.js", "workflow.js", "imaging.js", "inpaint.js"]) vm.runInThisContext(readFileSync(new URL(f, dir), "utf8"), { filename: f });
+const { styles, workflow: W, imaging: I, inpaint: IP } = globalThis.CS;
 
 const INFO = {
   CheckpointLoaderSimple: { input: { required: { ckpt_name: [["sd15_dreamshaper.safetensors", "sdxl_base.safetensors", "flux1-dev.safetensors"]] } } },
@@ -165,6 +165,56 @@ test("flux 2: references, loras, no controlnet, upscale refine", () => {
   const up = W.buildUpscale(FLUX2(), MODELS, { image: "a", width: 2048, height: 2048, refine: true, strength: 0.3, seed: 1 });
   assert.equal(input(up, "SplitSigmasDenoise", "denoise"), 0.3);
   assert.deepEqual(nodes(up, "Flux2Scheduler")[0].inputs, { steps: 20, width: 2048, height: 2048 });
+});
+
+test("inpaint modes are planned like Krita's", () => {
+  assert.equal(IP.resolveMode("auto", 0), "fill");
+  assert.equal(IP.resolveMode("auto", 0.9), "expand");
+  assert.equal(IP.resolveMode("remove", 0.9), "remove");
+  assert.equal(IP.plan("fill", "sdxl", 1).fill, "blur");
+  assert.equal(IP.plan("expand", "sdxl", 1).fill, "border");
+  assert.equal(IP.plan("add", "sdxl", 1).fill, "neutral");
+  const rm = IP.plan("remove", "sdxl", 1);
+  assert.equal(IP.composePrompt(rm, ""), "background scenery");
+  assert.equal(IP.composePrompt(rm, "grass"), "grass");
+  const bg = IP.plan("background", "sdxl", 1);
+  assert.ok(bg.invert && bg.context === "image" && bg.featherScale < 1);
+  assert.equal(IP.plan("fill", "sdxl", 0.5).mode, "refine");
+  assert.equal(IP.plan("custom", "sdxl", 1, { context: "mask" }).context, "mask");
+  const f2 = IP.plan("fill", "flux2", 1);
+  assert.equal(f2.referenceFill, "green");
+  assert.equal(IP.composePrompt(f2, "a lake"), "Fill the green spaces according to the image. a lake");
+  assert.equal(IP.composePrompt(IP.plan("remove", "flux2", 1), ""), "Remove the object.");
+});
+
+test("pre-fill: blur/border take the surroundings, neutral is grey, green marks the area", () => {
+  const w = 32, h = 32, rgba = new Uint8ClampedArray(w * h * 4), weight = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) { rgba.set([0, 0, 255, 255], i * 4); }
+  for (let y = 12; y < 20; y++) for (let x = 12; x < 20; x++) { const i = y * w + x; rgba.set([255, 0, 0, 255], i * 4); weight[i] = 255; }
+  const center = (out) => Array.from(out.slice((16 * w + 16) * 4, (16 * w + 16) * 4 + 4));
+  for (const mode of ["blur", "border"]) {
+    const c = center(I.prefill(rgba, w, h, weight, mode));
+    assert.ok(c[2] > 200 && c[0] < 40, mode + " " + c);  // blue from around, the red object gone
+  }
+  assert.deepEqual(center(I.prefill(rgba, w, h, weight, "neutral")), [128, 128, 128, 255]);
+  assert.deepEqual(center(I.prefill(rgba, w, h, weight, "green")), [0, 255, 0, 255]);
+  const corner = Array.from(I.prefill(rgba, w, h, weight, "border").slice(0, 4));
+  assert.deepEqual(corner, [0, 0, 255, 255]);  // outside the mask: untouched
+});
+
+test("transparent canvas becomes the expand mask", () => {
+  const w = 10, h = 4, rgba = new Uint8ClampedArray(w * h * 4).fill(255);
+  for (let y = 0; y < h; y++) for (let x = 6; x < w; x++) rgba[(y * w + x) * 4 + 3] = 0;
+  const m = IP.transparentMask(rgba, w, h);
+  assert.deepEqual(m.rect, { x: 6, y: 0, width: 4, height: 4 });
+  assert.ok(m.bytes.every(v => v === 255));
+  assert.equal(IP.transparentMask(new Uint8ClampedArray(w * h * 4).fill(255), w, h), null);
+});
+
+test("flux 2 reference image can differ from the start image", () => {
+  const g = W.buildGenerate(FLUX2(), MODELS, { prompt: "x", strength: 1, image: "prefilled.png", reference: "green.png", mask: "m.png", seed: 1, width: 64, height: 64 });
+  const loads = nodes(g, "LoadImage").map(n => n.inputs.image);
+  assert.deepEqual(loads.sort(), ["green.png", "prefilled.png"]);
 });
 
 test("Ukrainian strings", () => {

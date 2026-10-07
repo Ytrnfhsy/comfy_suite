@@ -63,3 +63,5 @@ button.link { background: none; border: none; color: var(--accent); text-align: 
 .history img.selected { border-color: var(--accent); }
 .custom-fields { display: flex; flex-direction: column; gap: 6px; }
 .control input.narrow { width: 50px; }
+.generate-row select.mode { flex: 0 0 auto; width: auto; max-width: 46%; }
+.custom-inpaint { display: flex; flex-direction: column; gap: 4px; }

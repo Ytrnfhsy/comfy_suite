@@ -20,9 +20,9 @@ WEB = os.environ.get("PHOTOSUITE_WEB")
 pytestmark = pytest.mark.skipif(not WEB, reason="PHOTOSUITE_WEB not set")
 
 
-def _png(w, h, fill=(255, 255, 255)):
+def _png(w, h, fill=(255, 255, 255), image=None):
     buf = io.BytesIO()
-    Image.new("RGB", (w, h), fill).save(buf, "PNG")
+    (image or Image.new("RGB", (w, h), fill)).save(buf, "PNG")
     return base64.b64encode(buf.getvalue()).decode()
 
 
@@ -36,13 +36,13 @@ def _wait(cond, timeout=30.0):
     return None
 
 
-def _open_document(h):
-    """Open a 400×300 white document the way a plugin or a drop would: an ArrayBuffer message.
-    (The sidebar, and so the panel, only shows with a document open.)"""
+def _open_document(h, image=None):
+    """Open a 400×300 white document (or `image`) the way a plugin or a drop would: an
+    ArrayBuffer message. (The sidebar, and so the panel, only shows with a document open.)"""
     h.page.evaluate(
         "(b64) => { const s = atob(b64), u = new Uint8Array(s.length);"
         " for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); window.postMessage(u.buffer, '*'); }",
-        _png(400, 300),
+        _png(400, 300, image=image),
     )
     time.sleep(2)
 
@@ -54,7 +54,13 @@ def cors(request):
 
 
 @pytest.fixture
-def ps(cors):
+def document():
+    """The image the test document opens with (None: 400×300 white)."""
+    return None
+
+
+@pytest.fixture
+def ps(cors, document):
     pytest.importorskip("playwright")
     from fake_comfy import FakeComfy
     from harness import Harness
@@ -64,7 +70,7 @@ def ps(cors):
         try:
             h.open()
             time.sleep(3)
-            _open_document(h)
+            _open_document(h, document)
             h.page.get_by_text("Window", exact=True).first.click()
             h.page.get_by_text("ComfySuite AI", exact=True).click()
             f = h.plugin_frame()
@@ -174,3 +180,84 @@ def test_flux2_fill_selection(ps):
     assert all(w % 16 == 0 and hh % 16 == 0 for w, hh in latent_sizes)
     assert _pixel(f, 150, 100) == [220, 40, 40, 255]
     assert _pixel(f, 20, 20) == [255, 255, 255, 255]
+
+
+def _select(f, x0, y0, x1, y1):
+    f.evaluate(f"CS.host.runScript('app.activeDocument.selection.select([[{x0},{y0}],[{x1},{y0}],[{x1},{y1}],[{x0},{y1}]])')")
+    assert _wait(lambda: f.evaluate("CS.host.selectionMask().then(s => !!s)"))
+
+
+def _canvas_upload(fake):
+    """The region image the panel uploaded (RGB, the largest)."""
+    return max((im for im in fake.uploads.values() if im.mode in ("RGB", "RGBA") and im.convert("L").getextrema() != (0, 255)), key=lambda im: im.size[0] * im.size[1])
+
+
+def _blue_with_red_square():
+    im = Image.new("RGB", (400, 300), (0, 0, 255))
+    im.paste((255, 0, 0), (140, 90, 180, 130))
+    return im
+
+
+@pytest.mark.parametrize("document", [_blue_with_red_square()], ids=["blue-red"])
+@pytest.mark.parametrize("cors", ["*"], ids=["cors-any"])
+def test_remove_object(ps):
+    h, f, fake = ps
+    _select(f, 130, 80, 190, 140)
+    f.select_option("#ws-generate select.mode", "remove")
+    f.fill("#ws-generate textarea", "")
+    _generate_and_apply(f, "")
+    texts = [n["inputs"]["text"] for n in fake.prompts[-1].values() if n["class_type"] == "CLIPTextEncode"]
+    assert "background scenery" in texts[0]
+    up = _canvas_upload(fake).convert("RGB")
+    cx, cy = up.size[0] // 2, up.size[1] // 2
+    r, g, b = up.getpixel((cx, cy))
+    assert b > 150 and r < 100, (r, g, b)  # the red square is pre-filled from the blue around it
+    assert _pixel(f, 160, 110) == [220, 40, 40, 255]  # result inside the selection
+    assert _pixel(f, 20, 20) == [0, 0, 255, 255]
+
+
+@pytest.mark.parametrize("cors", ["*"], ids=["cors-any"])
+def test_replace_background(ps):
+    h, f, fake = ps
+    _select(f, 150, 100, 250, 200)  # the subject
+    f.select_option("#ws-generate select.mode", "background")
+    _generate_and_apply(f, "a beach")
+    assert _pixel(f, 10, 10) == [220, 40, 40, 255]  # background replaced
+    assert _pixel(f, 390, 290) == [220, 40, 40, 255]
+    assert _pixel(f, 200, 150) == [255, 255, 255, 255]  # subject kept
+
+
+def _half_transparent():
+    im = Image.new("RGBA", (400, 300), (255, 255, 255, 255))
+    im.paste((0, 0, 0, 0), (250, 0, 400, 300))
+    return im
+
+
+@pytest.mark.parametrize("document", [_half_transparent()], ids=["enlarged-canvas"])
+@pytest.mark.parametrize("cors", ["*"], ids=["cors-any"])
+def test_expand_into_empty_canvas_without_selection(ps):
+    h, f, fake = ps
+    assert f.inner_text("#ws-generate button.primary") in ("Генерувати", "Generate")
+    _generate_and_apply(f, "more of the landscape")
+    assert any(n["class_type"] == "InpaintModelConditioning" for n in fake.prompts[-1].values())
+    assert _pixel(f, 350, 150) == [220, 40, 40, 255]  # the empty part is generated
+    assert _pixel(f, 100, 150) == [255, 255, 255, 255]  # the existing image stays
+
+
+@pytest.mark.parametrize("cors", ["*"], ids=["cors-any"])
+def test_flux2_modes_use_instructions_and_green_reference(ps):
+    h, f, fake = ps
+    f.select_option("#style", "Flux 2 Dev")
+    _select(f, 100, 50, 200, 150)
+    f.select_option("#ws-generate select.mode", "fill")
+    _generate_and_apply(f, "a pond")
+    graph = fake.prompts[-1]
+    text = next(n["inputs"]["text"] for n in graph.values() if n["class_type"] == "CLIPTextEncode")
+    assert text.startswith("Fill the green spaces according to the image.") and "a pond" in text
+    refs = [fake.uploads[n["inputs"]["image"]] for n in graph.values() if n["class_type"] == "LoadImage" and n.get("_meta", {}).get("title") == "Reference"]
+    ref = refs[0].convert("RGB")
+    assert ref.getpixel((ref.size[0] // 2, ref.size[1] // 2)) == (0, 255, 0)
+    f.select_option("#ws-generate select.mode", "add")
+    _generate_and_apply(f, "a duck")
+    text = next(n["inputs"]["text"] for n in fake.prompts[-1].values() if n["class_type"] == "CLIPTextEncode")
+    assert text == "Add the object to the scene. a duck"

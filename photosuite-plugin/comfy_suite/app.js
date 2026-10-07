@@ -200,7 +200,17 @@
     gen.fixed = h("input", { type: "checkbox" });
     gen.seed = h("input", { type: "number", min: 0, value: Math.floor(Math.random() * 1e9), disabled: true });
     gen.fixed.addEventListener("change", function () { gen.seed.disabled = !gen.fixed.checked; });
-    gen.button = h("button", { class: "primary", text: tr("Generate"), onclick: generate });
+    gen.button = h("button", { class: "primary grow", text: tr("Generate"), onclick: generate });
+    // Inpaint mode for a selection, as in Krita: the button says what will happen.
+    gen.mode = h("select", { class: "mode", title: tr("Inpaint mode"), onchange: updateGenerateButton });
+    options(gen.mode, CS.inpaint.MODES.map(function (m) { return [m, m === "auto" ? tr("Auto") : tr(MODE_LABELS[m])]; }), "auto");
+    gen.context = h("select"); options(gen.context, [["auto", tr("Auto")], ["mask", tr("Selection bounds")], ["image", tr("Entire image")]], "auto");
+    gen.grow = h("input", { type: "number", min: 0, max: 200, value: settings.selectionGrow, class: "narrow" });
+    gen.feather = h("input", { type: "number", min: 0, max: 200, value: settings.selectionFeather, class: "narrow" });
+    gen.custom = h("div", { class: "custom-inpaint hidden" }, [
+      row(tr("Context"), gen.context),
+      h("div", { class: "inline" }, [h("span", { text: tr("Grow") }), gen.grow, h("span", { text: tr("Feather") }), gen.feather])
+    ]);
     [gen.prompt, gen.negative].forEach(function (t) {
       t.addEventListener("keydown", function (e) { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); generate(); } });
     });
@@ -211,12 +221,26 @@
       row(tr("Strength"), gen.strength),
       h("div", { class: "inline" }, [h("span", { text: tr("Batch") }), gen.batch, h("label", {}, [gen.useSel, " " + tr("Use selection")])]),
       h("div", { class: "inline" }, [h("span", { text: tr("Seed") }), h("label", {}, [gen.fixed, " " + tr("Fixed")]), gen.seed]),
-      gen.button
+      gen.custom,
+      h("div", { class: "inline generate-row" }, [gen.mode, gen.button])
     ]);
   }
+  var MODE_LABELS = { auto: "Generate", fill: "Fill", expand: "Expand", add: "Add object", remove: "Remove object", background: "Replace background", custom: "Custom inpaint" };
   function updateGenerateButton() {
-    gen.button.textContent = gen.strength.value() < 1 ? tr("Refine") : tr("Generate");
+    var mode = gen.mode.value;
+    gen.custom.classList.toggle("hidden", mode !== "custom");
+    gen.button.textContent = gen.strength.value() < 1 ? tr("Refine") : tr(MODE_LABELS[mode]);
+    gen.button.title = tr(MODE_HINTS[mode]);
   }
+  var MODE_HINTS = {
+    auto: "Without a selection: the whole image. With one: fill it, or expand if it covers empty canvas.",
+    fill: "Generate new content in the selection that blends with its surroundings.",
+    expand: "Outpaint: enlarge the canvas (Image › Canvas Size), select the empty part (or nothing) and generate.",
+    add: "Add the object described in the prompt inside the selection.",
+    remove: "Remove what is selected and fill it with its surroundings.",
+    background: "Select the subject: everything else is replaced by the prompt.",
+    custom: "Inpaint with your own context, grow and feather."
+  };
   var controlRows = [];
   function addControl() {
     var mode = h("select"); options(mode, W.CONTROL_MODES.map(function (m) { return [m, m.charAt(0).toUpperCase() + m.slice(1)]; }), "scribble");
@@ -250,7 +274,8 @@
     var params = {
       prompt: gen.prompt.value.trim(), negative: gen.negative.value.trim(), strength: gen.strength.value(),
       seed: gen.fixed.checked ? +gen.seed.value : -1, batch: Math.max(1, Math.min(16, +gen.batch.value || 1)),
-      useSelection: gen.useSel.checked,
+      useSelection: gen.useSel.checked, inpaintMode: gen.mode.value,
+      context: gen.context.value, grow: +gen.grow.value, feather: +gen.feather.value,
       controls: controlRows.map(function (c) {
         return { mode: c.mode.value, source: c.source.value, image: c.image, model: c.model.value, preprocess: c.pre.checked,
           strength: c.strength.value(), start: +c.start.value, end: +c.end.value };
