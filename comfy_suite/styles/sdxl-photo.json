@@ -1,0 +1,17 @@
+{
+  "name": "Cinematic Photo (XL)",
+  "architecture": "sdxl",
+  "checkpoint": "",
+  "loras": [],
+  "style_prompt": "cinematic photo, {prompt}, highly detailed, sharp focus, natural light",
+  "negative_prompt": "lowres, blurry, deformed, watermark, text, signature, cartoon, painting",
+  "sampler": "dpmpp_2m",
+  "scheduler": "karras",
+  "steps": 24,
+  "cfg": 6.0,
+  "native_resolution": 1024,
+  "live_sampler": "euler_ancestral",
+  "live_scheduler": "sgm_uniform",
+  "live_steps": 8,
+  "live_cfg": 2.0
+}

@@ -1,0 +1,18 @@
+{
+  "name": "Flux",
+  "architecture": "flux",
+  "checkpoint": "",
+  "loras": [],
+  "style_prompt": "{prompt}",
+  "negative_prompt": "",
+  "sampler": "euler",
+  "scheduler": "simple",
+  "steps": 20,
+  "cfg": 1.0,
+  "guidance": 3.5,
+  "native_resolution": 1024,
+  "live_sampler": "euler",
+  "live_scheduler": "simple",
+  "live_steps": 6,
+  "live_cfg": 1.0
+}

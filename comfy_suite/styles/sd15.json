@@ -1,0 +1,18 @@
+{
+  "name": "Universal (SD 1.5)",
+  "architecture": "sd15",
+  "checkpoint": "",
+  "loras": [],
+  "style_prompt": "{prompt}, best quality, highly detailed",
+  "negative_prompt": "lowres, bad anatomy, bad hands, blurry, watermark, text",
+  "sampler": "dpmpp_2m",
+  "scheduler": "karras",
+  "steps": 20,
+  "cfg": 7.0,
+  "clip_skip": 1,
+  "native_resolution": 512,
+  "live_sampler": "euler_ancestral",
+  "live_scheduler": "normal",
+  "live_steps": 8,
+  "live_cfg": 2.5
+}

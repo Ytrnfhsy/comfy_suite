@@ -1,0 +1,17 @@
+{
+  "name": "Digital Artwork (XL)",
+  "architecture": "sdxl",
+  "checkpoint": "",
+  "loras": [],
+  "style_prompt": "digital artwork, {prompt}, concept art, intricate details, vibrant colors",
+  "negative_prompt": "lowres, blurry, jpeg artifacts, watermark, text, signature, photo",
+  "sampler": "dpmpp_2m_sde",
+  "scheduler": "karras",
+  "steps": 24,
+  "cfg": 6.5,
+  "native_resolution": 1024,
+  "live_sampler": "euler_ancestral",
+  "live_scheduler": "sgm_uniform",
+  "live_steps": 8,
+  "live_cfg": 2.0
+}
