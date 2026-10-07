@@ -261,3 +261,51 @@ def test_flux2_modes_use_instructions_and_green_reference(ps):
     _generate_and_apply(f, "a duck")
     text = next(n["inputs"]["text"] for n in fake.prompts[-1].values() if n["class_type"] == "CLIPTextEncode")
     assert text == "Add the object to the scene. a duck"
+
+
+def test_server_address_survives_a_restart(tmp_path):
+    """The panel can't write files: set-server.sh writes config.local.js, which the next start reads."""
+    pytest.importorskip("playwright")
+    import shutil
+    import subprocess
+
+    from fake_comfy import FakeComfy
+    from harness import PLUGIN_DIR, Harness
+
+    plugin = tmp_path / "comfy_suite"
+    shutil.copytree(PLUGIN_DIR, plugin, ignore=shutil.ignore_patterns("config.local.js"))
+    with FakeComfy(cors="*") as fake:
+        def start():
+            h = Harness(Path(WEB), plugin_dir=plugin)
+            h.open()
+            time.sleep(3)
+            _open_document(h)
+            h.page.get_by_text("Window", exact=True).first.click()
+            h.page.get_by_text("ComfySuite AI", exact=True).click()
+            f = h.plugin_frame()
+            f.wait_for_selector("#tab-settings")
+            return h, f
+
+        # First run: the default address fails; typing ours works but shows how to keep it.
+        h, f = start()
+        try:
+            f.click("#tab-settings")
+            f.fill("#ws-settings input[type=text]", fake.url)
+            f.click("#ws-settings button.primary")
+            assert _wait(lambda: "ok" in f.get_attribute("#status", "class"))
+            command = f.input_value("#ws-settings .persist textarea")
+            assert command.endswith("set-server.sh " + fake.url)
+        finally:
+            h.close()
+
+        subprocess.run(["sh", str(plugin / "set-server.sh"), fake.url], check=True, capture_output=True)
+
+        # After a restart the panel connects to the saved server straight away.
+        h, f = start()
+        try:
+            assert _wait(lambda: "ok" in f.get_attribute("#status", "class")), f.inner_text("#message")
+            f.click("#tab-settings")
+            assert f.input_value("#ws-settings input[type=text]") == fake.url
+            assert f.is_hidden("#ws-settings .persist")
+        finally:
+            h.close()

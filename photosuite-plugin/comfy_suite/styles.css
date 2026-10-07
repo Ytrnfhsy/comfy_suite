@@ -65,3 +65,5 @@ button.link { background: none; border: none; color: var(--accent); text-align: 
 .control input.narrow { width: 50px; }
 .generate-row select.mode { flex: 0 0 auto; width: auto; max-width: 46%; }
 .custom-inpaint { display: flex; flex-direction: column; gap: 4px; }
+.persist { border: 1px solid var(--accent); border-radius: 6px; padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+.persist textarea.command { font-family: ui-monospace, monospace; font-size: 11px; }

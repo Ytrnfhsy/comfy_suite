@@ -5,6 +5,7 @@
 
   /* ---- settings (config.js defaults, kept per session; localStorage when the sandbox allows) ---- */
   var cfg = typeof COMFY_SUITE_CONFIG !== "undefined" ? COMFY_SUITE_CONFIG : {};
+  var savedUrl = cfg.comfyUrl || "http://127.0.0.1:8188";  // what survives a restart
   var settings = {
     comfyUrl: cfg.comfyUrl || "http://127.0.0.1:8188", language: cfg.language != null ? cfg.language : "", theme: cfg.theme || "dark", style: cfg.style || "",
     batch: cfg.batch || 2, selectionGrow: cfg.selectionGrow != null ? cfg.selectionGrow : 8,
@@ -417,11 +418,34 @@
         settings.theme = set.theme.value; applyTheme();
         store("settings", settings);
         if (langChanged) location.reload();
+        showPersistHint();
         connect();
       } }),
+      set.persist = h("div", { class: "persist hidden" }),
       h("div", { class: "hint", text: tr("Settings are kept for this session; set defaults in config.js.") }),
       h("div", { class: "hint", text: tr("Start ComfyUI with --enable-cors-header so the panel can reach it.") })
     ]);
+  }
+
+  /* The sandboxed panel cannot write files: show the one command that saves the server
+     address into config.local.js, so it survives restarts and updates. */
+  function persistCommand(url) {
+    var ua = (navigator.userAgent || "") + " " + (navigator.platform || "");
+    if (/Win/i.test(ua)) return 'powershell -ExecutionPolicy Bypass -File "$env:APPDATA\\app.photosuite\\plugins\\comfy_suite\\set-server.ps1" ' + url;
+    if (/Mac/i.test(ua)) return 'sh "$HOME/Library/Application Support/app.photosuite/plugins/comfy_suite/set-server.sh" ' + url;
+    return "sh ~/.local/share/app.photosuite/plugins/comfy_suite/set-server.sh " + url;
+  }
+  function showPersistHint() {
+    var box = set.persist;
+    box.innerHTML = "";
+    if (settings.comfyUrl === savedUrl) { box.classList.add("hidden"); return; }
+    var cmd = h("textarea", { rows: 3, readonly: true, class: "command" });
+    cmd.value = persistCommand(settings.comfyUrl);
+    cmd.addEventListener("focus", function () { cmd.select(); });
+    box.appendChild(h("div", { text: tr("To keep this server after a restart, run once in a terminal:") }));
+    box.appendChild(cmd);
+    box.appendChild(h("div", { class: "hint", text: tr("(If the plugin folder is not named comfy_suite, use its name.) Then restart PhotoSuite.") }));
+    box.classList.remove("hidden");
   }
 
   /* -- Style editor -- */

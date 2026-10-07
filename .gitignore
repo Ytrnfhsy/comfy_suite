@@ -5,3 +5,5 @@ __pycache__/
 build/
 dist/
 .venv/
+# Per-user plugin settings written by set-server.sh
+photosuite-plugin/comfy_suite/config.local.js

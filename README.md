@@ -118,9 +118,22 @@
 - LoRA для Flux 2 застосовуються лише до моделі (`LoraLoaderModelOnly`), напр. Flux 2 Turbo LoRA
   (тоді ~8 кроків).
 
-Панель працює в пісочниці без доступу до сховища, тому змінені в ній налаштування та стилі діють до
-перезапуску. Постійні значення — у `photosuite-plugin/comfy_suite/config.js` (адреса ComfyUI, мова,
-тема, власні стилі; редактор стилів показує готовий JSON для вставки).
+### Збереження адреси сервера
+
+Панель працює в пісочниці PhotoSuite і не може сама записувати файли, тому змінене на вкладці ⚙
+діє до перезапуску. Щоб адреса ComfyUI зберігалася, один раз виконайте (панель після «Зберегти»
+показує цю команду вже з вашою адресою):
+
+```sh
+sh ~/.local/share/app.photosuite/plugins/comfy_suite/set-server.sh http://100.64.0.5:8188
+```
+
+(macOS: `~/Library/Application Support/app.photosuite/plugins/comfy_suite/set-server.sh`;
+Windows: `set-server.ps1` у `%APPDATA%\app.photosuite\plugins\comfy_suite\`.) Адреса
+записується в `config.local.js`, який не відстежується git, тож `git pull` її не скидає;
+`install-plugin.sh` при перевстановленні теж переносить цей файл (або: `sh install-plugin.sh
+http://…:8188`). Інші постійні налаштування (мова, тема, власні стилі — редактор стилів показує
+готовий JSON) можна дописати туди ж або в `config.js`.
 
 ## Версії 0.9.16 і новіші: окреме вікно
 

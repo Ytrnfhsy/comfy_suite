@@ -25,6 +25,8 @@
     "Style prompt": "Запит стилю", "Sampler": "Семплер", "Scheduler": "Планувальник", "Steps": "Кроки",
     "Native resolution": "Рідна роздільність", "Live sampling": "Семплінг наживо", "Add LoRA": "Додати LoRA",
     "Save as new": "Зберегти як новий",
+    "To keep this server after a restart, run once in a terminal:": "Щоб сервер зберігся після перезапуску, один раз виконайте в терміналі:",
+    "(If the plugin folder is not named comfy_suite, use its name.) Then restart PhotoSuite.": "(Якщо тека плагіна називається не comfy_suite — підставте її назву.) Потім перезапустіть PhotoSuite.",
     "Inpaint mode": "Режим заповнення", "Expand": "Розширити", "Add object": "Додати об'єкт",
     "Remove object": "Видалити об'єкт", "Replace background": "Замінити фон", "Custom inpaint": "Власне заповнення",
     "Context": "Контекст", "Selection bounds": "Межі виділення", "Entire image": "Усе зображення",
@@ -45,7 +47,7 @@
     "Upscaled image opened as a new document.": "Збільшене зображення відкрито новим документом.",
     "Start ComfyUI with --enable-cors-header so the panel can reach it.": "Запустіть ComfyUI з параметром --enable-cors-header, щоб панель могла до нього звертатися.",
     "Styles are kept for this session. To keep them, copy this into config.js (styles):": "Стилі зберігаються до кінця сесії. Щоб зберегти назавжди, скопіюйте це в config.js (styles):",
-    "Settings are kept for this session; set defaults in config.js.": "Налаштування діють до кінця сесії; значення за замовчуванням — у config.js."
+    "Settings are kept for this session; set defaults in config.js.": "Налаштування в панелі діють до перезапуску; постійні — у config.local.js (див. команду вище) або config.js."
   };
   var lang = "";
   CS.setLanguage = function (l) { lang = l || ""; };
