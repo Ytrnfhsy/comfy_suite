@@ -6,8 +6,10 @@ var COMFY_SUITE_CONFIG = {
   theme: "dark",           // "dark", or "light" for PhotoSuite's Pearl theme
   style: "",               // name of the default style
   batch: 2,
-  selectionGrow: 8,
-  selectionFeather: 12,
+  selectionGrow: 4,          // px added to the selection before feathering
+  selectionFeather: 10,      // % of the selection's diagonal (as Krita)
+  selectionMinFeather: 32,   // px, the minimum soft transition
+  selectionBlend: 25,        // px, the soft edge the result is blended in with
   contextPadding: 0.25,
   liveIntervalMs: 1500,
   styles: []               // extra styles, same shape as the built-in ones in styles.js

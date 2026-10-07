@@ -78,8 +78,31 @@
   /* Grow and feather a coverage mask so seams blend (two box passes ≈ a soft blur). */
   function prepareMask(mask, w, h, grow, feather) {
     var m = dilate(mask, w, h, Math.min(25, grow | 0));
-    var r = Math.max(0, Math.round((feather | 0) / 2));
+    // Two box passes of radius feather/4: a ~feather px wide, roughly linear ramp.
+    var r = Math.max(0, Math.round((feather | 0) / 4));
     return boxBlur(boxBlur(m, w, h, r), w, h, r);
+  }
+
+  function erode(src, w, h, radius) {
+    if (radius <= 0) return src;
+    var inv = new Uint8Array(src.length);
+    for (var i = 0; i < src.length; i++) inv[i] = 255 - src[i];
+    var d = dilate(inv, w, h, radius);
+    for (var j = 0; j < d.length; j++) d[j] = 255 - d[j];
+    return d;
+  }
+
+  /* The result's alpha, as Krita blends it: everything the denoise mask touched, shrunk by
+     blend/2 and softened by blend, never less than the selection itself. */
+  function compositeMask(weight, selection, w, h, blend) {
+    var m = new Uint8Array(w * h), i;
+    for (i = 0; i < m.length; i++) m[i] = weight[i] > 0 ? 255 : 0;
+    if (blend > 0) {
+      var r = Math.max(1, Math.round(blend / 4));
+      m = boxBlur(boxBlur(erode(m, w, h, Math.floor(blend / 2)), w, h, r), w, h, r);
+    }
+    for (i = 0; i < m.length; i++) if (selection[i] > m[i]) m[i] = selection[i];
+    return m;
   }
 
   /* The selection's coverage (rect-sized bytes) placed into a region-sized mask. */
@@ -285,7 +308,7 @@
 
   CS.imaging = {
     rect: rect, clampRect: clampRect, multipleOf: multipleOf, generationExtent: generationExtent,
-    inpaintContext: inpaintContext, dilate: dilate, boxBlur: boxBlur, prepareMask: prepareMask,
+    inpaintContext: inpaintContext, dilate: dilate, erode: erode, boxBlur: boxBlur, prepareMask: prepareMask, compositeMask: compositeMask,
     maskForRegion: maskForRegion, pushPull: pushPull, prefill: prefill, transparentShare: transparentShare, canvas: canvas, decode: decode, crop: crop, resize: resize,
     flatten: flatten, maskCanvas: maskCanvas, withAlpha: withAlpha, toBlob: toBlob,
     rgbaOf: rgbaOf, fromRgba: fromRgba

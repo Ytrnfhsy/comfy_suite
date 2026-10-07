@@ -95,6 +95,22 @@ test("custom workflows", () => {
   assert.throws(() => W.loadCustomWorkflow('{"nodes":[],"links":[]}'), /Export \(API\)/);
 });
 
+test("mask sizes follow Krita (the worm example: 250×256 → grow 20, feather 32, blend 25)", () => {
+  const S = { selectionFeather: 10, selectionMinFeather: 32, selectionGrow: 4, selectionBlend: 25 };
+  assert.deepEqual(IP.maskSizes(S, 250, 256, 1, 1, false), { feather: 36, grow: 22, blend: 25 });
+  assert.deepEqual(IP.maskSizes(S, 150, 150, 1, 1, false), { feather: 32, grow: 20, blend: 25 });
+  assert.deepEqual(IP.maskSizes(S, 2000, 1000, 1, 1, false), { feather: 224, grow: 116, blend: 25 });
+  assert.equal(IP.maskSizes(S, 150, 150, 0.5, 1, false).feather, 16);  // refine: scaled by strength
+  assert.equal(IP.maskSizes(S, 400, 300, 1, 0.1, true).feather, 5);    // background: barely feathered
+  assert.deepEqual(IP.maskSizes(Object.assign({}, S, { selectionFeather: 0 }), 100, 100, 1, 1, false), { feather: 0, grow: 0, blend: 0 });
+  // The result's alpha covers the selection fully and fades out beyond it.
+  const w = 64, h = 64, sel = new Uint8Array(w * h);
+  for (let y = 24; y < 40; y++) for (let x = 24; x < 40; x++) sel[y * w + x] = 255;
+  const weight = I.prepareMask(sel, w, h, 8, 12), comp = I.compositeMask(weight, sel, w, h, 10);
+  assert.ok(sel.every((v, i) => comp[i] >= v));
+  assert.ok(comp[32 * w + 18] > 0 && comp[32 * w + 18] < 255 && comp[2 * w + 2] === 0);
+});
+
 test("geometry and masks", () => {
   assert.deepEqual(I.generationExtent(256, 256, 1024), { width: 1024, height: 1024 });
   const big = I.generationExtent(6000, 4000, 1024);
@@ -133,7 +149,7 @@ test("flux 2: text to image uses the custom sampler chain", () => {
   assert.equal(input(g, "RandomNoise", "noise_seed"), 5);
   assert.equal(nodes(g, "KSampler").length, 0);
   assert.deepEqual(input(g, "BasicGuider", "conditioning"), [linkTo(g, "FluxGuidance"), 0]);
-  assert.deepEqual(input(g, "VAEDecode", "samples"), [linkTo(g, "SamplerCustomAdvanced"), 0]);
+  assert.deepEqual(input(g, "VAEDecode", "samples"), [linkTo(g, "SamplerCustomAdvanced"), 1]);  // denoised_output
   // Klein base with cfg > 1 uses CFGGuider and the negative prompt.
   const base = Object.assign(KLEIN(), { cfg: 5, steps: 20 });
   const gb = W.buildGenerate(base, MODELS, { prompt: "x", negative: "blur", strength: 1, seed: 1, width: 512, height: 512 });
@@ -185,6 +201,7 @@ test("inpaint modes are planned like Krita's", () => {
   const f2 = IP.plan("fill", "flux2", 1);
   assert.equal(f2.fill, "none");
   assert.equal(IP.composePrompt(f2, "a lake"), "a lake");
+  assert.equal(IP.composePrompt(IP.plan("add", "flux2", 1), "add worm"), "Add the object to the scene.\n\nadd worm");
   const f2l = IP.plan("expand", "flux2", 1, { flux2Outpaint: true });
   assert.ok(f2l.fill === "green" && f2l.outpaintLora);
   assert.equal(IP.composePrompt(f2l, ""), "Fill the green spaces according to the image.");
@@ -232,6 +249,21 @@ test("flux 2 Klein expand matches Krita's workflow (outpaint LoRA, green, shared
   assert.deepEqual(input(g, "RepeatLatentBatch", "samples"), [id("SetLatentNoiseMask"), 0]);
   assert.deepEqual(input(g, "INPAINT_ColorMatch", "target"), [id("VAEDecode"), 0]);
   assert.deepEqual(input(g, "PreviewImage", "images"), [id("INPAINT_ColorMatch"), 0]);
+});
+
+test("flux 2 Klein add object matches Krita's workflow (no LoRA, no green, instruction + prompt)", () => {
+  const plan = IP.plan("add", "flux2", 1, { flux2Outpaint: true });
+  assert.ok(plan.fill === "none" && !plan.outpaintLora);
+  const g = W.buildGenerate(KLEIN(), MODELS, { prompt: IP.composePrompt(plan, "add worm"), strength: 1,
+    image: "region.png", mask: "m.png", seed: 1, batch: 4, width: 256, height: 288 });
+  const id = t => linkTo(g, t);
+  assert.equal(nodes(g, "CLIPTextEncode")[0].inputs.text, "Add the object to the scene.\n\nadd worm");
+  assert.equal(nodes(g, "LoraLoaderModelOnly").length, 0);
+  assert.deepEqual(input(g, "BasicGuider", "model"), [id("DifferentialDiffusion"), 0]);
+  assert.deepEqual(input(g, "ReferenceLatent", "latent"), [id("SetLatentNoiseMask"), 0]);
+  assert.equal(input(g, "RepeatLatentBatch", "amount"), 4);
+  assert.deepEqual(nodes(g, "Flux2Scheduler")[0].inputs, { steps: 4, width: 256, height: 288 });
+  assert.deepEqual(input(g, "VAEDecode", "samples"), [id("SamplerCustomAdvanced"), 1]);
 });
 
 test("flux 2 reference image can differ from the start image", () => {

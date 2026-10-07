@@ -64,15 +64,21 @@
         }
         plan = IP.plan(mode, arch, params.strength, { context: params.context, flux2Outpaint: !!outpaintLora });
         if (plan.invert) sel = { rect: docRect, bytes: IP.invert(I.maskForRegion(sel.bytes, sel.rect, docRect)) };
+        var sizes = IP.maskSizes(s, sel.rect.width, sel.rect.height, params.strength, plan.featherScale, plan.invert);
+        if (plan.mode === "custom") {
+          if (params.grow != null) sizes.grow = params.grow;
+          if (params.feather != null) sizes.feather = params.feather;
+        }
+        // The context must hold the grown, feathered mask plus untouched surroundings to match.
+        var minPad = sizes.grow + sizes.feather + 32;
         if (plan.context === "image") region = docRect;
         else if (plan.context === "mask") region = I.clampRect(sel.rect, docRect);
-        else region = I.inpaintContext(sel.rect, docRect, s.contextPadding);
+        else region = I.inpaintContext(sel.rect, docRect, s.contextPadding, minPad);
         if (region.width < 1 || region.height < 1) throw new Error("the selection is outside the canvas");
         regionMask = I.maskForRegion(sel.bytes, sel.rect, region);
-        var custom = plan.mode === "custom";
-        var grow = custom && params.grow != null ? params.grow : s.selectionGrow;
-        var feather = (custom && params.feather != null ? params.feather : s.selectionFeather) * plan.featherScale;
-        weight = I.prepareMask(regionMask, region.width, region.height, grow, Math.round(feather));
+        weight = I.prepareMask(regionMask, region.width, region.height, sizes.grow, sizes.feather);
+        // The result lands through a softer, slightly wider mask than the selection, as in Krita.
+        regionMask = I.compositeMask(weight, regionMask, region.width, region.height, sizes.blend);
       }
       var size = I.generationExtent(region.width, region.height, style.native_resolution);
       var seed = W.resolveSeed(params.seed);

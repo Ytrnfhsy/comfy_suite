@@ -8,8 +8,10 @@
   var savedUrl = cfg.comfyUrl || "http://127.0.0.1:8188";  // what survives a restart
   var settings = {
     comfyUrl: cfg.comfyUrl || "http://127.0.0.1:8188", language: cfg.language != null ? cfg.language : "", theme: cfg.theme || "dark", style: cfg.style || "",
-    batch: cfg.batch || 2, selectionGrow: cfg.selectionGrow != null ? cfg.selectionGrow : 8,
-    selectionFeather: cfg.selectionFeather != null ? cfg.selectionFeather : 12,
+    batch: cfg.batch || 2, selectionGrow: cfg.selectionGrow != null ? cfg.selectionGrow : 4,
+    selectionFeather: cfg.selectionFeather != null ? cfg.selectionFeather : 10,
+    selectionMinFeather: cfg.selectionMinFeather != null ? cfg.selectionMinFeather : 32,
+    selectionBlend: cfg.selectionBlend != null ? cfg.selectionBlend : 25,
     contextPadding: cfg.contextPadding != null ? cfg.contextPadding : 0.25, liveIntervalMs: cfg.liveIntervalMs || 1500
   };
   var storage = null;
@@ -206,8 +208,8 @@
     gen.mode = h("select", { class: "mode", title: tr("Inpaint mode"), onchange: updateGenerateButton });
     options(gen.mode, CS.inpaint.MODES.map(function (m) { return [m, m === "auto" ? tr("Auto") : tr(MODE_LABELS[m])]; }), "auto");
     gen.context = h("select"); options(gen.context, [["auto", tr("Auto")], ["mask", tr("Selection bounds")], ["image", tr("Entire image")]], "auto");
-    gen.grow = h("input", { type: "number", min: 0, max: 200, value: settings.selectionGrow, class: "narrow" });
-    gen.feather = h("input", { type: "number", min: 0, max: 200, value: settings.selectionFeather, class: "narrow" });
+    gen.grow = h("input", { type: "number", min: 0, max: 200, value: 20, class: "narrow" });
+    gen.feather = h("input", { type: "number", min: 0, max: 200, value: 32, class: "narrow" });
     gen.custom = h("div", { class: "custom-inpaint hidden" }, [
       row(tr("Context"), gen.context),
       h("div", { class: "inline" }, [h("span", { text: tr("Grow") }), gen.grow, h("span", { text: tr("Feather") }), gen.feather])
@@ -400,14 +402,14 @@
   function buildSettings() {
     set.url = h("input", { type: "text", value: settings.comfyUrl });
     set.grow = h("input", { type: "number", min: 0, max: 200, value: settings.selectionGrow, class: "narrow" });
-    set.feather = h("input", { type: "number", min: 0, max: 200, value: settings.selectionFeather, class: "narrow" });
+    set.feather = h("input", { type: "number", min: 0, max: 100, value: settings.selectionFeather, class: "narrow" });
     set.padding = h("input", { type: "number", min: 0, max: 2, step: 0.05, value: settings.contextPadding, class: "narrow" });
     set.interval = h("input", { type: "number", min: 300, max: 10000, step: 100, value: settings.liveIntervalMs, class: "narrow" });
     set.lang = h("select"); options(set.lang, [["", "System"], ["uk", "Українська"], ["en", "English"]], settings.language);
     set.theme = h("select"); options(set.theme, [["dark", tr("Dark")], ["light", tr("Light")]], settings.theme);
     return h("section", { id: "ws-settings", class: "hidden" }, [
       row(tr("ComfyUI server"), set.url),
-      row(tr("Selection grow (px)"), set.grow), row(tr("Selection feather (px)"), set.feather),
+      row(tr("Selection grow (px)"), set.grow), row(tr("Selection feather (%)"), set.feather),
       row(tr("Context around selection"), set.padding), row(tr("Live interval (ms)"), set.interval), row(tr("Language"), set.lang), row(tr("Theme"), set.theme),
       h("button", { class: "primary", text: tr("Save") + " & " + tr("Connect"), onclick: function () {
         settings.comfyUrl = set.url.value.trim() || settings.comfyUrl;

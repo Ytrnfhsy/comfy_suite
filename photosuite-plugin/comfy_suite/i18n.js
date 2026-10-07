@@ -18,7 +18,7 @@
     "Target size": "Цільовий розмір", "Start": "Старт", "Stop": "Стоп",
     "Live painting regenerates the canvas while you paint.": "Живе малювання перегенеровує полотно, поки ви малюєте.",
     "Load workflow…": "Завантажити workflow…", "Or paste the API JSON here": "Або вставте сюди API JSON",
-    "Run": "Запустити", "ComfyUI server": "Сервер ComfyUI", "Selection grow (px)": "Розширення виділення (px)",
+    "Run": "Запустити", "ComfyUI server": "Сервер ComfyUI", "Selection grow (px)": "Розширення виділення (px)", "Selection feather (%)": "Розмиття краю (% розміру)",
     "Selection feather (px)": "Розмиття краю (px)", "Context around selection": "Контекст навколо виділення",
     "Live interval (ms)": "Інтервал наживо (мс)", "Language": "Мова", "Theme": "Тема", "Dark": "Темна", "Light": "Світла", "Save": "Зберегти", "Close": "Закрити",
     "Name": "Назва", "Architecture": "Архітектура", "Checkpoint": "Чекпойнт", "From checkpoint": "З чекпойнта",

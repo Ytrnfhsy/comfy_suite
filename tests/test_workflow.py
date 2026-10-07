@@ -205,7 +205,7 @@ def test_flux2_text_to_image():
     assert nodes(g, "EmptyFlux2LatentImage")[0]["inputs"] == {"width": 1024, "height": 768, "batch_size": 2}
     assert nodes(g, "Flux2Scheduler")[0]["inputs"] == {"steps": 20, "width": 1024, "height": 768}
     assert nodes(g, "BasicGuider")[0]["inputs"]["conditioning"] == _link(g, "FluxGuidance")
-    assert nodes(g, "VAEDecode")[0]["inputs"]["samples"] == _link(g, "SamplerCustomAdvanced")
+    assert nodes(g, "VAEDecode")[0]["inputs"]["samples"] == _link(g, "SamplerCustomAdvanced", 1)
     g = build_generate(Style(architecture="flux2", cfg=5), FLUX2_MODELS, GenerateRequest(prompt="x"))
     assert nodes(g, "CFGGuider")[0]["inputs"]["cfg"] == 5
 

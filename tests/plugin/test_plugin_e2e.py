@@ -276,14 +276,14 @@ def test_flux2_without_outpaint_lora_never_paints_green(ps):
     _generate_and_apply(f, "a meadow")
     graph = fake.prompts[-1]
     text = next(n["inputs"]["text"] for n in graph.values() if n["class_type"] == "CLIPTextEncode")
-    assert text == "Expand the image to fill the empty canvas. a meadow"
+    assert text == "Expand the image to fill the empty canvas.\n\na meadow"
     assert not any(n["class_type"] == "LoraLoaderModelOnly" for n in graph.values())
     start = fake.uploads[next(n["inputs"]["image"] for n in graph.values() if n.get("_meta", {}).get("title") == "Canvas")].convert("RGB")
     assert (0, 255, 0) not in [c for _, c in start.getcolors(1 << 20)]
     f.select_option("#ws-generate select.mode", "add")
     _generate_and_apply(f, "a duck")
     text = next(n["inputs"]["text"] for n in fake.prompts[-1].values() if n["class_type"] == "CLIPTextEncode")
-    assert text == "Add the object to the scene. a duck"
+    assert text == "Add the object to the scene.\n\na duck"
 
 
 def test_server_address_survives_a_restart(tmp_path):

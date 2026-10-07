@@ -305,7 +305,7 @@ def sample(g: Graph, m: Loaded, o: SampleArgs) -> Out:
         sampler=g.add("KSamplerSelect", sampler_name=o.sampler).out,
         sigmas=sigmas,
         latent_image=o.latent,
-    )[0]
+    )[1]  # denoised_output, as Krita uses (cleaner with few-step distilled models)
 
 
 def apply_controls(

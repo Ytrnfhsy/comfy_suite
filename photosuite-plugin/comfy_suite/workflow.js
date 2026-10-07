@@ -184,7 +184,7 @@
       sampler: g.add("KSamplerSelect", { sampler_name: o.sampler }).out(),
       sigmas: sigmas,
       latent_image: o.latent
-    }).out(0);
+    }).out(1);  // denoised_output, as Krita uses (cleaner with few-step distilled models)
   }
 
   function applyControls(g, m, models, controls, positive, negative, width, height) {

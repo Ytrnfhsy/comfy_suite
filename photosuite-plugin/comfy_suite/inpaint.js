@@ -40,7 +40,7 @@
     if (strength < 1) { p.mode = "refine"; return p; }
     switch (mode) {
       case "fill": p.fill = "blur"; break;
-      case "expand": p.fill = "border"; p.featherScale = 0.5; break;
+      case "expand": p.fill = "border"; break;
       case "add": p.fill = "neutral"; break;
       case "remove": p.fill = "border"; p.defaultPrompt = "background scenery"; break;
       case "background": p.fill = "neutral"; p.invert = true; p.featherScale = 0.1; p.context = "image"; break;
@@ -64,7 +64,22 @@
 
   function composePrompt(p, prompt) {
     prompt = (prompt || "").trim() || p.defaultPrompt;
-    return [p.instruction, prompt].filter(Boolean).join(" ");
+    return [p.instruction, prompt].filter(Boolean).join("\n\n");
+  }
+
+  /* Mask sizes, as Krita computes them from the selection's size:
+       feather = max(featherPct% of the diagonal, minFeather px) × strength (no minimum when inverted)
+       grow    = growOffset + feather / 2           (denoise mask: dilate by grow, then blur by feather)
+       blend   = min(blendMax, grow + feather / 2)   (result alpha: erode by blend / 2, then blur by blend)
+     s: { selectionFeather (%), selectionMinFeather, selectionGrow (offset px), selectionBlend } */
+  function maskSizes(s, width, height, strength, featherScale, invert) {
+    var diagonal = Math.sqrt(width * width + height * height);
+    var feather = Math.round((s.selectionFeather / 100) * featherScale * strength * diagonal);
+    if (!invert) feather = Math.max(feather, Math.round(s.selectionMinFeather * strength));
+    if (!(s.selectionFeather > 0)) feather = 0;
+    var grow = s.selectionFeather > 0 ? s.selectionGrow + Math.floor(feather / 2) : 0;
+    var blend = s.selectionFeather > 0 ? Math.min(s.selectionBlend, grow + Math.floor(feather / 2)) : 0;
+    return { feather: feather, grow: grow, blend: blend };
   }
 
   /* Bytes (0..255) over w×h marking transparent pixels, and their bounding box, or null. */
@@ -90,5 +105,5 @@
     return out;
   }
 
-  CS.inpaint = { MODES: MODES, FLUX2_INSTRUCTIONS: FLUX2_INSTRUCTIONS, resolveMode: resolveMode, plan: plan, composePrompt: composePrompt, transparentMask: transparentMask, invert: invert };
+  CS.inpaint = { MODES: MODES, FLUX2_INSTRUCTIONS: FLUX2_INSTRUCTIONS, resolveMode: resolveMode, plan: plan, composePrompt: composePrompt, maskSizes: maskSizes, transparentMask: transparentMask, invert: invert };
 })(typeof window !== "undefined" ? (window.CS = window.CS || {}) : (globalThis.CS = globalThis.CS || {}));
