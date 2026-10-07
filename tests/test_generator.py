@@ -31,7 +31,7 @@ def test_generate_whole_canvas(photosuite):  # noqa: F811
         assert [im.size for im in r.images] == [(300, 200)] * 2
         assert not fake.uploads  # text to image needs no canvas
         (latent,) = [n for n in fake.prompts[0].values() if n["class_type"] == "EmptyLatentImage"]
-        assert latent["inputs"]["width"] % 8 == 0 and latent["inputs"]["width"] > 300  # scaled to native
+        assert latent["inputs"]["width"] % 16 == 0 and latent["inputs"]["width"] > 300  # scaled to native
         g.apply(r, 1)
         doc = g.bridge.document()
         assert doc.layers[0].name.startswith("[AI] meadow")

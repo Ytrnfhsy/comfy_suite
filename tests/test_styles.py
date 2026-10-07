@@ -6,7 +6,7 @@ from comfy_suite.styles import LoraRef, Style, StyleLibrary, guess_architecture
 
 def test_builtin_styles_load(tmp_path):
     lib = StyleLibrary(tmp_path)
-    assert len(lib.styles) >= 4
+    assert len(lib.styles) >= 6
     assert lib.get("Flux").architecture == "flux"
 
 

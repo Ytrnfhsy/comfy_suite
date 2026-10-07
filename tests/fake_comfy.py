@@ -18,7 +18,20 @@ from PIL import Image
 
 OBJECT_INFO: dict[str, Any] = {
     "CheckpointLoaderSimple": {"input": {"required": {"ckpt_name": [["sdxl_base.safetensors", "sd15_dreamshaper.safetensors", "flux1-dev-fp8.safetensors"]]}}},
-    "VAELoader": {"input": {"required": {"vae_name": [["sdxl_vae.safetensors"]]}}},
+    "VAELoader": {"input": {"required": {"vae_name": [["sdxl_vae.safetensors", "flux2-vae.safetensors"]]}}},
+    "UNETLoader": {"input": {"required": {"unet_name": [["flux2_dev_fp8mixed.safetensors", "flux-2-klein-4b.safetensors"]], "weight_dtype": [["default", "fp8_e4m3fn"]]}}},
+    "CLIPLoader": {"input": {"required": {"clip_name": [["mistral_3_small_flux2_bf16.safetensors", "qwen_3_4b.safetensors"]], "type": [["stable_diffusion", "flux2"]]}}},
+    "LoraLoaderModelOnly": {"input": {"required": {}}},
+    "EmptyFlux2LatentImage": {"input": {"required": {}}},
+    "Flux2Scheduler": {"input": {"required": {}}},
+    "SplitSigmasDenoise": {"input": {"required": {}}},
+    "BasicGuider": {"input": {"required": {}}},
+    "CFGGuider": {"input": {"required": {}}},
+    "RandomNoise": {"input": {"required": {}}},
+    "KSamplerSelect": {"input": {"required": {}}},
+    "SamplerCustomAdvanced": {"input": {"required": {}}},
+    "ReferenceLatent": {"input": {"required": {}}},
+    "SetLatentNoiseMask": {"input": {"required": {}}},
     "LoraLoader": {"input": {"required": {"lora_name": [["detail.safetensors"]], "strength_model": ["FLOAT", {"default": 1.0}], "strength_clip": ["FLOAT", {"default": 1.0}]}}},
     "ControlNetLoader": {"input": {"required": {"control_net_name": [["control_sd15_scribble.pth", "controlnet-union-sdxl-promax.safetensors"]]}}},
     "UpscaleModelLoader": {"input": {"required": {"model_name": [["4x-UltraSharp.pth"]]}}},
@@ -87,7 +100,7 @@ class FakeComfy:
         t, inp = node["class_type"], node["inputs"]
         if depth > 50:
             return (64, 64, 1)
-        if t in ("EmptyLatentImage", "EmptySD3LatentImage"):
+        if t in ("EmptyLatentImage", "EmptySD3LatentImage", "EmptyFlux2LatentImage"):
             return (inp["width"], inp["height"], inp.get("batch_size", 1))
         if t in ("ImageScale",):
             _, _, b = self._size(graph, inp["image"][0], depth + 1)

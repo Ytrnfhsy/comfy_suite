@@ -1,0 +1,20 @@
+{
+  "name": "Flux 2 Klein",
+  "architecture": "flux2",
+  "diffusion_model": "klein",
+  "text_encoder": "",
+  "vae": "",
+  "loras": [],
+  "style_prompt": "{prompt}",
+  "negative_prompt": "",
+  "sampler": "euler",
+  "scheduler": "simple",
+  "steps": 4,
+  "cfg": 1.0,
+  "guidance": 4.0,
+  "native_resolution": 1024,
+  "live_sampler": "euler",
+  "live_scheduler": "simple",
+  "live_steps": 4,
+  "live_cfg": 1.0
+}

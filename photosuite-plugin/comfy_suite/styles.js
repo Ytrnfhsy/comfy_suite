@@ -25,6 +25,20 @@
       native_resolution: 512, live_sampler: "euler_ancestral", live_scheduler: "normal", live_steps: 8, live_cfg: 2.5
     },
     {
+      name: "Flux 2 Dev", architecture: "flux2", checkpoint: "", vae: "", loras: [],
+      diffusion_model: "", text_encoder: "",
+      style_prompt: "{prompt}", negative_prompt: "",
+      sampler: "euler", scheduler: "simple", steps: 20, cfg: 1.0, guidance: 4.0, clip_skip: 1,
+      native_resolution: 1024, live_sampler: "euler", live_scheduler: "simple", live_steps: 8, live_cfg: 1.0
+    },
+    {
+      name: "Flux 2 Klein", architecture: "flux2", checkpoint: "", vae: "", loras: [],
+      diffusion_model: "klein", text_encoder: "",
+      style_prompt: "{prompt}", negative_prompt: "",
+      sampler: "euler", scheduler: "simple", steps: 4, cfg: 1.0, guidance: 4.0, clip_skip: 1,
+      native_resolution: 1024, live_sampler: "euler", live_scheduler: "simple", live_steps: 4, live_cfg: 1.0
+    },
+    {
       name: "Flux", architecture: "flux", checkpoint: "", vae: "", loras: [],
       style_prompt: "{prompt}", negative_prompt: "",
       sampler: "euler", scheduler: "simple", steps: 20, cfg: 1.0, guidance: 3.5, clip_skip: 1,
@@ -34,12 +48,14 @@
 
   var DEFAULTS = {
     name: "New Style", architecture: "auto", checkpoint: "", vae: "", loras: [],
+    diffusion_model: "", text_encoder: "", flux2_reference: true,
     style_prompt: "{prompt}", negative_prompt: "", sampler: "euler", scheduler: "normal",
     steps: 20, cfg: 7.0, guidance: 3.5, clip_skip: 1, native_resolution: 1024,
     live_sampler: "euler_ancestral", live_scheduler: "normal", live_steps: 8, live_cfg: 2.0
   };
 
   var ARCH_HINTS = {
+    flux2: /flux[-_. ]?2|klein/i,
     flux: /flux/i,
     sdxl: /xl|pony|illustrious|noob|juggernaut|realvis/i,
     sd15: /sd-?1\.?5|v1-5|sd15|dreamshaper_8|realistic.?vision|deliberate/i
@@ -55,7 +71,7 @@
   }
 
   function guessArchitecture(filename) {
-    var order = ["flux", "sdxl", "sd15"];
+    var order = ["flux2", "flux", "sdxl", "sd15"];
     for (var i = 0; i < order.length; i++) if (ARCH_HINTS[order[i]].test(filename || "")) return order[i];
     return null;
   }
@@ -78,6 +94,36 @@
       for (var i = 0; i < available.length; i++) if (guessArchitecture(available[i]) === style.architecture) return available[i];
     }
     return available[0];
+  }
+
+  /* Flux 2 has no all-in-one checkpoint: a diffusion model (UNETLoader), a text encoder
+     (CLIPLoader, type flux2: Mistral for Dev, Qwen 3 for Klein) and the Flux 2 VAE.
+     A style may name each file, or give a fragment ("klein") to pick among the installed ones. */
+  function pickFile(list, wanted, preferred, what) {
+    if (wanted && list.indexOf(wanted) >= 0) return wanted;
+    var pool = list;
+    if (wanted) {
+      pool = list.filter(function (f) { return f.toLowerCase().indexOf(wanted.toLowerCase()) >= 0; });
+      if (!pool.length) {
+        if (!list.length) return wanted; // the server didn't list its files: trust the style
+        throw new Error(what + " `" + wanted + "` is not installed on the server");
+      }
+    }
+    for (var i = 0; i < preferred.length; i++) {
+      for (var j = 0; j < pool.length; j++) if (preferred[i].test(pool[j])) return pool[j];
+    }
+    if (wanted && pool.length) return pool[0];
+    throw new Error("no " + what + " for Flux 2 is installed on the server");
+  }
+
+  function resolveFlux2(style, models) {
+    var unet = pickFile(models.diffusion_models || [], style.diffusion_model, [/flux[-_. ]?2.*dev|dev.*flux[-_. ]?2/i, /flux[-_. ]?2|klein/i], "diffusion model");
+    var klein = /klein/i.test(unet);
+    var big = /9b|8b/i.test(unet);
+    var clip = pickFile(models.text_encoders || [], style.text_encoder,
+      klein ? (big ? [/qwen.?3.?8b/i, /qwen.?3/i] : [/qwen.?3.?4b/i, /qwen.?3/i]) : [/mistral.*flux.?2|flux.?2.*mistral/i, /mistral/i], "text encoder");
+    var vae = pickFile(models.vaes || [], style.vae, [/flux[-_. ]?2/i, /full_encoder_small_decoder/i], "VAE");
+    return { unet: unet, clip: clip, vae: vae };
   }
 
   function StyleLibrary(extra) {
@@ -112,8 +158,9 @@
   };
 
   CS.styles = {
-    BUILTIN: BUILTIN, ARCHITECTURES: ["auto", "sd15", "sdxl", "flux"], normalize: normalize,
+    BUILTIN: BUILTIN, ARCHITECTURES: ["auto", "sd15", "sdxl", "flux", "flux2"], normalize: normalize,
     guessArchitecture: guessArchitecture, applyPrompt: applyPrompt, resolveCheckpoint: resolveCheckpoint,
+    resolveFlux2: resolveFlux2,
     StyleLibrary: StyleLibrary
   };
 })(typeof window !== "undefined" ? (window.CS = window.CS || {}) : (globalThis.CS = globalThis.CS || {}));

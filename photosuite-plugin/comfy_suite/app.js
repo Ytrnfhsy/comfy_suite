@@ -401,7 +401,7 @@
 
   /* -- Style editor -- */
   function buildStyleEditor() {
-    var s = currentStyle(), m = comfy.models || { checkpoints: [], vaes: [], loras: [], samplers: [], schedulers: [] };
+    var s = currentStyle(), m = comfy.models || { checkpoints: [], vaes: [], loras: [], samplers: [], schedulers: [], diffusion_models: [], text_encoders: [] };
     var samplers = m.samplers.length ? m.samplers : ["euler", "euler_ancestral", "dpmpp_2m", "dpmpp_2m_sde", "dpmpp_sde", "ddim"];
     var schedulers = m.schedulers.length ? m.schedulers : ["normal", "karras", "exponential", "sgm_uniform", "simple", "beta"];
     function sel(items, v) { var e = h("select"); options(e, items, v); return e; }
@@ -411,6 +411,9 @@
       architecture: sel(CS.styles.ARCHITECTURES, s.architecture),
       checkpoint: sel([["", tr("Auto")]].concat(m.checkpoints), s.checkpoint),
       vae: sel([["", tr("From checkpoint")]].concat(m.vaes), s.vae),
+      diffusion_model: sel([["", tr("Auto")]].concat(m.diffusion_models || []), s.diffusion_model),
+      text_encoder: sel([["", tr("Auto")]].concat(m.text_encoders || []), s.text_encoder),
+      flux2_reference: h("input", { type: "checkbox", checked: s.flux2_reference !== false }),
       style_prompt: h("textarea", { rows: 2 }), negative_prompt: h("textarea", { rows: 2 }),
       sampler: sel(samplers, s.sampler), scheduler: sel(schedulers, s.scheduler),
       steps: num(s.steps), cfg: num(s.cfg, 0.5), guidance: num(s.guidance, 0.5), clip_skip: num(s.clip_skip),
@@ -430,7 +433,7 @@
     var exportBox = h("textarea", { rows: 3, readonly: true, class: "hidden" });
     function collect() {
       var out = {};
-      Object.keys(f).forEach(function (k) { out[k] = f[k].type === "number" ? +f[k].value : f[k].value; });
+      Object.keys(f).forEach(function (k) { out[k] = f[k].type === "number" ? +f[k].value : f[k].type === "checkbox" ? f[k].checked : f[k].value; });
       out.loras = Array.prototype.map.call(loras.children, function (r) { return r.read(); }).filter(function (l) { return l.name; });
       return out;
     }
@@ -448,6 +451,9 @@
     var editor = $("style-editor");
     editor.innerHTML = "";
     [row(tr("Name"), f.name), row(tr("Architecture"), f.architecture), row(tr("Checkpoint"), f.checkpoint), row("VAE", f.vae),
+      h("div", { class: "hint", text: tr("Flux 2: separate model files (the checkpoint is not used)") }),
+      row(tr("Diffusion model"), f.diffusion_model), row(tr("Text encoder"), f.text_encoder),
+      h("label", { class: "inline" }, [f.flux2_reference, " " + tr("Use the canvas as a reference when refining")]),
       row(tr("Style prompt"), f.style_prompt), row(tr("Negative prompt"), f.negative_prompt),
       row(tr("Sampler"), f.sampler), row(tr("Scheduler"), f.scheduler), row(tr("Steps"), f.steps), row("CFG", f.cfg),
       row("Guidance (Flux)", f.guidance), row("CLIP skip", f.clip_skip), row(tr("Native resolution"), f.native_resolution),

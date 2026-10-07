@@ -36,6 +36,7 @@ class ServerModels:
     checkpoints: list[str] = field(default_factory=list)
     diffusion_models: list[str] = field(default_factory=list)
     vaes: list[str] = field(default_factory=list)
+    text_encoders: list[str] = field(default_factory=list)
     loras: list[str] = field(default_factory=list)
     controlnets: list[str] = field(default_factory=list)
     upscalers: list[str] = field(default_factory=list)
@@ -72,6 +73,7 @@ def parse_models(info: dict[str, Any]) -> ServerModels:
         checkpoints=_choices(info, "CheckpointLoaderSimple", "ckpt_name"),
         diffusion_models=_choices(info, "UNETLoader", "unet_name"),
         vaes=_choices(info, "VAELoader", "vae_name"),
+        text_encoders=_choices(info, "CLIPLoader", "clip_name"),
         loras=_choices(info, "LoraLoader", "lora_name"),
         controlnets=_choices(info, "ControlNetLoader", "control_net_name"),
         upscalers=_choices(info, "UpscaleModelLoader", "model_name"),

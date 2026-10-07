@@ -70,7 +70,7 @@ def generation_extent(width: int, height: int, native: int = 1024, min_side: int
 
     Small regions are scaled up so the model sees roughly ``native²`` pixels (models produce
     poor results far below their training resolution), large ones scaled down to at most
-    ``max_pixels_factor × native²``; the aspect ratio is kept and both sides are multiples of 8.
+    ``max_pixels_factor × native²``; the aspect ratio is kept and both sides are multiples of 16.
     """
     width, height = max(1, width), max(1, height)
     pixels = width * height
@@ -86,7 +86,8 @@ def generation_extent(width: int, height: int, native: int = 1024, min_side: int
     if shortest < min_side:
         k = min_side / shortest
         gw, gh = gw * k, gh * k
-    return Extent((width, height), (multiple_of(gw), multiple_of(gh)))
+    # Multiples of 16: Flux 2 latents are 1/16 of the image (and 16 suits SD/Flux 1 too).
+    return Extent((width, height), (multiple_of(gw, 16), multiple_of(gh, 16)))
 
 
 def inpaint_context(selection: Bounds, canvas: Bounds, padding: float = 0.25, min_padding: int = 32) -> Bounds:

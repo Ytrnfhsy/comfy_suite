@@ -166,3 +166,61 @@ def test_load_custom_workflow_rejects_ui_format():
         load_custom_workflow(json.dumps({"nodes": [], "links": []}))
     with pytest.raises(WorkflowError):
         load_custom_workflow("{not json")
+
+
+# ---- Flux 2 ---------------------------------------------------------------------------------------
+
+FLUX2_INFO = dict(
+    OBJECT_INFO,
+    UNETLoader={"input": {"required": {"unet_name": [["flux2_dev_fp8mixed.safetensors", "flux-2-klein-4b.safetensors", "flux-2-klein-base-9b.safetensors"]]}}},
+    CLIPLoader={"input": {"required": {"clip_name": [["mistral_3_small_flux2_bf16.safetensors", "qwen_3_4b.safetensors", "qwen_3_8b_fp8mixed.safetensors"]]}}},
+    VAELoader={"input": {"required": {"vae_name": [["sdxl_vae.safetensors", "flux2-vae.safetensors"]]}}},
+)
+FLUX2_MODELS = parse_models(FLUX2_INFO)
+
+
+def _link(g, class_type, index=0):
+    return [next(k for k, v in g.nodes.items() if v["class_type"] == class_type), index]
+
+
+def test_flux2_files_are_picked_like_the_templates():
+    from comfy_suite.styles import guess_architecture
+
+    assert guess_architecture("flux2_dev_fp8mixed.safetensors") == "flux2"
+    assert guess_architecture("flux-2-klein-4b.safetensors") == "flux2"
+    assert guess_architecture("flux1-dev.safetensors") == "flux"
+    assert Style(architecture="flux2").resolve_flux2(FLUX2_MODELS) == ("flux2_dev_fp8mixed.safetensors", "mistral_3_small_flux2_bf16.safetensors", "flux2-vae.safetensors")
+    assert Style(architecture="flux2", diffusion_model="klein").resolve_flux2(FLUX2_MODELS)[1] == "qwen_3_4b.safetensors"
+    assert Style(architecture="flux2", diffusion_model="base-9b").resolve_flux2(FLUX2_MODELS)[1] == "qwen_3_8b_fp8mixed.safetensors"
+    with pytest.raises(ValueError):
+        Style(architecture="flux2", diffusion_model="nope").resolve_flux2(FLUX2_MODELS)
+
+
+def test_flux2_text_to_image():
+    s = Style(architecture="flux2", guidance=4, cfg=1, steps=20)
+    g = build_generate(s, FLUX2_MODELS, GenerateRequest(prompt="fox", seed=5, batch=2, width=1024, height=768))
+    assert_links_valid(g)
+    assert not nodes(g, "CheckpointLoaderSimple") and not nodes(g, "KSampler")
+    assert nodes(g, "CLIPLoader")[0]["inputs"]["type"] == "flux2"
+    assert nodes(g, "EmptyFlux2LatentImage")[0]["inputs"] == {"width": 1024, "height": 768, "batch_size": 2}
+    assert nodes(g, "Flux2Scheduler")[0]["inputs"] == {"steps": 20, "width": 1024, "height": 768}
+    assert nodes(g, "BasicGuider")[0]["inputs"]["conditioning"] == _link(g, "FluxGuidance")
+    assert nodes(g, "VAEDecode")[0]["inputs"]["samples"] == _link(g, "SamplerCustomAdvanced")
+    g = build_generate(Style(architecture="flux2", cfg=5), FLUX2_MODELS, GenerateRequest(prompt="x"))
+    assert nodes(g, "CFGGuider")[0]["inputs"]["cfg"] == 5
+
+
+def test_flux2_inpaint_reference_loras_and_controls():
+    s = Style(architecture="flux2", loras=[LoraRef("detail.safetensors", 0.7)])
+    g = build_generate(s, FLUX2_MODELS, GenerateRequest(prompt="x", strength=0.5, image="a.png", mask="m.png", width=512, height=512))
+    assert_links_valid(g)
+    assert nodes(g, "SamplerCustomAdvanced")[0]["inputs"]["latent_image"] == _link(g, "SetLatentNoiseMask")
+    assert nodes(g, "SamplerCustomAdvanced")[0]["inputs"]["sigmas"] == _link(g, "SplitSigmasDenoise", 1)
+    assert len(nodes(g, "ReferenceLatent")) == 2 and not nodes(g, "InpaintModelConditioning")
+    assert nodes(g, "LoraLoaderModelOnly")[0]["inputs"]["strength_model"] == 0.7
+    ref = GenerateRequest(prompt="x", controls=[ControlInput("reference", "r.png")])
+    assert len(nodes(build_generate(Style(architecture="flux2"), FLUX2_MODELS, ref), "ReferenceLatent")) == 2
+    with pytest.raises(WorkflowError, match="reference"):
+        build_generate(Style(architecture="flux2"), FLUX2_MODELS, GenerateRequest(controls=[ControlInput("depth", "d.png")]))
+    up = build_upscale(Style(architecture="flux2"), FLUX2_MODELS, UpscaleRequest("a.png", 2048, 2048, refine=True, strength=0.3))
+    assert nodes(up, "SplitSigmasDenoise")[0]["inputs"]["denoise"] == 0.3

@@ -81,6 +81,28 @@
 - **Власний граф** — workflow ComfyUI у форматі API з плейсхолдерами (див. нижче).
 - **✎** біля стилю — редактор стилів (чекпойнт, LoRA, семплер, кроки, CFG…).
 
+### Flux 2
+
+Стилі **Flux 2 Dev** і **Flux 2 Klein** будують граф так само, як офіційні шаблони ComfyUI
+(Flux.2 Dev / Flux.2 Klein): окремі файли замість чекпойнта, `Flux2Scheduler`,
+`SamplerCustomAdvanced`. Файли підбираються автоматично з установлених:
+
+| | Flux 2 Dev | Flux 2 Klein |
+|---|---|---|
+| `models/diffusion_models` | `flux2_dev_fp8mixed.safetensors` | `flux-2-klein-4b.safetensors` (або 9b, base) |
+| `models/text_encoders` | `mistral_3_small_flux2_bf16.safetensors` | `qwen_3_4b.safetensors` (9b → `qwen_3_8b…`) |
+| `models/vae` | `flux2-vae.safetensors` | `flux2-vae.safetensors` |
+
+- Конкретні файли можна вибрати в редакторі стилю (поля «Дифузійна модель», «Текстовий енкодер», VAE).
+- `cfg` 1 → `BasicGuider` з `FluxGuidance` (Dev, Klein distilled); `cfg` > 1 → `CFGGuider` з
+  негативним запитом (Klein base, напр. 20 кроків, cfg 5).
+- Заповнення й доопрацювання: латент ділянки з маскою шуму + сама ділянка як референс
+  (`ReferenceLatent`), щоб нове узгоджувалося з оточенням (вимикається в стилі).
+- Керування для Flux 2 — режим **reference** (рідні референсні зображення Flux 2, кілька можна
+  поєднувати); ControlNet для Flux 2 поки не підтримується.
+- LoRA для Flux 2 застосовуються лише до моделі (`LoraLoaderModelOnly`), напр. Flux 2 Turbo LoRA
+  (тоді ~8 кроків).
+
 Панель працює в пісочниці без доступу до сховища, тому змінені в ній налаштування та стилі діють до
 перезапуску. Постійні значення — у `photosuite-plugin/comfy_suite/config.js` (адреса ComfyUI, мова,
 тема, власні стилі; редактор стилів показує готовий JSON для вставки).
@@ -122,7 +144,7 @@ ComfySuite використовує лише вбудовані вузли Comfy
 | **Автороздільність** | Малі області збільшуються до рідної роздільності моделі (512/1024), великі — зменшуються; результат масштабується назад. |
 | **Керувальні шари** | ControlNet: scribble, lineart, softedge, canny, depth, normal, pose, segmentation, blur/tile. Джерело — будь-який шар документа або полотно; сила й діапазон кроків; модель вибирається автоматично за назвою файлу або вручну. |
 | **Референс** | IP-Adapter (режим `reference`), якщо встановлено ComfyUI_IPAdapter_plus. |
-| **Стилі** | Пресети: чекпойнт (або автовибір), VAE, LoRA, шаблон запиту, негативний запит, семплер, планувальник, кроки, CFG, guidance для Flux, CLIP skip, окремі налаштування для живого режиму. Вбудовано: Cinematic Photo (XL), Digital Artwork (XL), Universal (SD 1.5), Flux. |
+| **Стилі** | Пресети: чекпойнт (або автовибір), VAE, LoRA, шаблон запиту, негативний запит, семплер, планувальник, кроки, CFG, guidance для Flux, CLIP skip, окремі налаштування для живого режиму. Вбудовано: Cinematic Photo (XL), Digital Artwork (XL), Universal (SD 1.5), Flux, Flux 2 Dev, Flux 2 Klein. |
 | **Збільшення** | 1.5×–4× моделлю збільшення (ESRGAN тощо) або Lanczos, з необов'язковим доопрацюванням (тайловий VAE). Результат відкривається новим документом. |
 | **Наживо** | Перегенерує полотно (чи виділення) після кожної зміни в документі; результат можна застосувати шаром. |
 | **Власний граф** | Будь-який workflow ComfyUI у форматі API з плейсхолдерами `{{prompt}}`, `{{seed}}`, `{{strength}}`… і вузлами `LoadImage` з назвою «PhotoSuite Canvas» / «PhotoSuite Mask». |

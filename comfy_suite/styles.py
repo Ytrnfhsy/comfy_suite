@@ -16,10 +16,11 @@ from .comfy import ServerModels
 
 BUILTIN_DIR = Path(__file__).parent / "styles"
 
-ARCHITECTURES = ("auto", "sd15", "sdxl", "flux")
+ARCHITECTURES = ("auto", "sd15", "sdxl", "flux", "flux2")
 
 # File-name hints used to guess a checkpoint's architecture and to auto-pick one.
 _ARCH_HINTS = {
+    "flux2": re.compile(r"flux[-_. ]?2|klein", re.I),
     "flux": re.compile(r"flux", re.I),
     "sdxl": re.compile(r"xl|pony|illustrious|noob|juggernaut|realvis", re.I),
     "sd15": re.compile(r"sd-?1\.?5|v1-5|sd15|dreamshaper_8|realistic.?vision|deliberate", re.I),
@@ -39,6 +40,9 @@ class Style:
     architecture: str = "auto"
     checkpoint: str = ""
     vae: str = ""
+    diffusion_model: str = ""  # Flux 2: UNETLoader file, or a fragment of its name ("klein")
+    text_encoder: str = ""  # Flux 2: CLIPLoader file (Mistral for Dev, Qwen 3 for Klein)
+    flux2_reference: bool = True  # Flux 2: give the canvas as a reference latent when refining
     loras: list[LoraRef] = field(default_factory=list)
     style_prompt: str = "{prompt}"
     negative_prompt: str = ""
@@ -58,7 +62,7 @@ class Style:
     @staticmethod
     def from_dict(d: dict[str, Any], filename: str = "") -> "Style":
         known = {f.name for f in fields(Style)}
-        kw = {k: v for k, v in d.items() if k in known and k != "loras"}
+        kw = {k: v for k, v in d.items() if k in known and k not in ("loras", "filename")}
         loras = [LoraRef(**{k: v for k, v in l.items() if k in ("name", "strength", "enabled")}) for l in d.get("loras", []) if isinstance(l, dict) and l.get("name")]
         s = Style(**kw, loras=loras)
         s.filename = filename or s.filename
@@ -79,7 +83,7 @@ class Style:
         return re.sub(r"(,\s*){2,}", ", ", out).strip(" ,")
 
     def resolved_architecture(self) -> str:
-        if self.architecture in ("sd15", "sdxl", "flux"):
+        if self.architecture in ("sd15", "sdxl", "flux", "flux2"):
             return self.architecture
         return guess_architecture(self.checkpoint) or "sdxl"
 
@@ -100,8 +104,38 @@ class Style:
         return available[0]
 
 
+    def resolve_flux2(self, models: ServerModels) -> tuple[str, str, str]:
+        """(diffusion model, text encoder, VAE) for a Flux 2 style, picked among the installed
+        files like ComfyUI's Flux.2 templates name them."""
+        unet = _pick_file(models.diffusion_models, self.diffusion_model, [r"flux[-_. ]?2.*dev|dev.*flux[-_. ]?2", r"flux[-_. ]?2|klein"], "diffusion model")
+        klein, big = bool(re.search("klein", unet, re.I)), bool(re.search(r"9b|8b", unet, re.I))
+        enc_prefs = ([r"qwen.?3.?8b", r"qwen.?3"] if big else [r"qwen.?3.?4b", r"qwen.?3"]) if klein else [r"mistral.*flux.?2|flux.?2.*mistral", r"mistral"]
+        clip = _pick_file(models.text_encoders, self.text_encoder, enc_prefs, "text encoder")
+        vae = _pick_file(models.vaes, self.vae, [r"flux[-_. ]?2", r"full_encoder_small_decoder"], "VAE")
+        return unet, clip, vae
+
+
+def _pick_file(available: list[str], wanted: str, preferred: list[str], what: str) -> str:
+    if wanted and wanted in available:
+        return wanted
+    pool = available
+    if wanted:
+        pool = [f for f in available if wanted.lower() in f.lower()]
+        if not pool:
+            if not available:
+                return wanted  # the server didn't list its files: trust the style
+            raise ValueError(f"{what} `{wanted}` is not installed on the server")
+    for pattern in preferred:
+        for f in pool:
+            if re.search(pattern, f, re.I):
+                return f
+    if wanted and pool:
+        return pool[0]
+    raise ValueError(f"no {what} for Flux 2 is installed on the server")
+
+
 def guess_architecture(filename: str) -> str | None:
-    for arch in ("flux", "sdxl", "sd15"):
+    for arch in ("flux2", "flux", "sdxl", "sd15"):
         if _ARCH_HINTS[arch].search(filename or ""):
             return arch
     return None

@@ -16,6 +16,9 @@ const INFO = {
   KSampler: { input: { required: { sampler_name: [["euler", "dpmpp_2m"]], scheduler: ["COMBO", { options: ["normal", "karras"] }] } } },
   VAEEncodeTiled: { input: { required: { temporal_size: ["INT", { default: 64 }] } } },
   Canny: { input: { required: {} } },
+  UNETLoader: { input: { required: { unet_name: [["flux2_dev_fp8mixed.safetensors", "flux-2-klein-4b.safetensors", "flux-2-klein-base-9b.safetensors"]], weight_dtype: [["default", "fp8_e4m3fn"]] } } },
+  CLIPLoader: { input: { required: { clip_name: [["mistral_3_small_flux2_bf16.safetensors", "qwen_3_4b.safetensors", "qwen_3_8b_fp8mixed.safetensors"]], type: [["stable_diffusion", "flux2"]] } } },
+  VAELoader: { input: { required: { vae_name: [["sdxl_vae.safetensors", "flux2-vae.safetensors"]] } } },
 };
 const MODELS = W.parseModels(INFO);
 const SDXL = styles.normalize({ name: "x", architecture: "sdxl", style_prompt: "photo, {prompt}", negative_prompt: "blurry" });
@@ -95,13 +98,73 @@ test("custom workflows", () => {
 test("geometry and masks", () => {
   assert.deepEqual(I.generationExtent(256, 256, 1024), { width: 1024, height: 1024 });
   const big = I.generationExtent(6000, 4000, 1024);
-  assert.ok(big.width % 8 === 0 && big.width * big.height <= 1.5 * 1024 * 1024 * 1.02);
+  assert.ok(big.width % 16 === 0 && big.height % 16 === 0 && big.width * big.height <= 1.5 * 1024 * 1024 * 1.02);
   assert.deepEqual(I.inpaintContext(I.rect(10, 10, 100, 100), I.rect(0, 0, 500, 400)), I.rect(0, 0, 142, 142));
   const m = new Uint8Array(64 * 64); for (let y = 24; y < 40; y++) for (let x = 24; x < 40; x++) m[y * 64 + x] = 255;
   const p = I.prepareMask(m, 64, 64, 4, 4);
   assert.ok(p[32 * 64 + 21] > 150 && p[2 * 64 + 2] === 0);
   const r = I.maskForRegion(new Uint8Array([1, 2, 3, 4]), I.rect(5, 5, 2, 2), I.rect(4, 4, 4, 4));
   assert.deepEqual(Array.from(r), [0,0,0,0, 0,1,2,0, 0,3,4,0, 0,0,0,0]);
+});
+
+const FLUX2 = () => styles.normalize(styles.BUILTIN.find(s => s.name === "Flux 2 Dev"));
+const KLEIN = () => styles.normalize(styles.BUILTIN.find(s => s.name === "Flux 2 Klein"));
+const input = (g, t, k) => nodes(g, t)[0].inputs[k];
+const linkTo = (g, t) => Object.entries(g.nodes).find(([, n]) => n.class_type === t)[0];
+
+test("flux 2: model files are picked like ComfyUI's templates", () => {
+  assert.equal(styles.guessArchitecture("flux2_dev_fp8mixed.safetensors"), "flux2");
+  assert.equal(styles.guessArchitecture("flux-2-klein-4b.safetensors"), "flux2");
+  assert.equal(styles.guessArchitecture("flux1-dev.safetensors"), "flux");
+  assert.deepEqual(styles.resolveFlux2(FLUX2(), MODELS), { unet: "flux2_dev_fp8mixed.safetensors", clip: "mistral_3_small_flux2_bf16.safetensors", vae: "flux2-vae.safetensors" });
+  assert.deepEqual(styles.resolveFlux2(KLEIN(), MODELS), { unet: "flux-2-klein-4b.safetensors", clip: "qwen_3_4b.safetensors", vae: "flux2-vae.safetensors" });
+  const nine = Object.assign(KLEIN(), { diffusion_model: "base-9b" });
+  assert.equal(styles.resolveFlux2(nine, MODELS).clip, "qwen_3_8b_fp8mixed.safetensors");
+  assert.throws(() => styles.resolveFlux2(Object.assign(FLUX2(), { diffusion_model: "nope" }), MODELS), /not installed/);
+});
+
+test("flux 2: text to image uses the custom sampler chain", () => {
+  const g = W.buildGenerate(FLUX2(), MODELS, { prompt: "a fox", strength: 1, seed: 5, batch: 2, width: 1024, height: 768 });
+  assert.equal(nodes(g, "CheckpointLoaderSimple").length, 0);
+  assert.equal(input(g, "CLIPLoader", "type"), "flux2");
+  assert.deepEqual(nodes(g, "EmptyFlux2LatentImage")[0].inputs, { width: 1024, height: 768, batch_size: 2 });
+  assert.deepEqual(nodes(g, "Flux2Scheduler")[0].inputs, { steps: 20, width: 1024, height: 768 });
+  assert.equal(input(g, "FluxGuidance", "guidance"), 4);
+  assert.equal(input(g, "RandomNoise", "noise_seed"), 5);
+  assert.equal(nodes(g, "KSampler").length, 0);
+  assert.deepEqual(input(g, "BasicGuider", "conditioning"), [linkTo(g, "FluxGuidance"), 0]);
+  assert.deepEqual(input(g, "VAEDecode", "samples"), [linkTo(g, "SamplerCustomAdvanced"), 0]);
+  // Klein base with cfg > 1 uses CFGGuider and the negative prompt.
+  const base = Object.assign(KLEIN(), { cfg: 5, steps: 20 });
+  const gb = W.buildGenerate(base, MODELS, { prompt: "x", negative: "blur", strength: 1, seed: 1, width: 512, height: 512 });
+  assert.equal(input(gb, "CFGGuider", "cfg"), 5);
+  assert.equal(nodes(gb, "BasicGuider").length, 0);
+});
+
+test("flux 2: refine and inpaint keep the canvas as reference and mask the noise", () => {
+  const g = W.buildGenerate(FLUX2(), MODELS, { prompt: "x", strength: 0.5, image: "a.png", mask: "m.png", seed: 1, width: 512, height: 512 });
+  assert.deepEqual(input(g, "SetLatentNoiseMask", "mask"), [linkTo(g, "LoadImageMask"), 0]);
+  assert.deepEqual(input(g, "SamplerCustomAdvanced", "latent_image"), [linkTo(g, "SetLatentNoiseMask"), 0]);
+  assert.equal(input(g, "SplitSigmasDenoise", "denoise"), 0.5);
+  assert.deepEqual(input(g, "SamplerCustomAdvanced", "sigmas"), [linkTo(g, "SplitSigmasDenoise"), 1]);
+  assert.equal(nodes(g, "ReferenceLatent").length, 2);
+  assert.equal(nodes(g, "InpaintModelConditioning").length, 0);
+  const noRef = Object.assign(FLUX2(), { flux2_reference: false });
+  assert.equal(nodes(W.buildGenerate(noRef, MODELS, { strength: 0.5, image: "a.png", seed: 1, width: 64, height: 64 }), "ReferenceLatent").length, 0);
+});
+
+test("flux 2: references, loras, no controlnet, upscale refine", () => {
+  const st = Object.assign(FLUX2(), { loras: [{ name: "detail.safetensors", strength: 0.7, enabled: true }] });
+  const g = W.buildGenerate(st, MODELS, { prompt: "x", strength: 1, seed: 1, width: 512, height: 512,
+    controls: [{ mode: "reference", image: "r.png", strength: 1, start: 0, end: 1 }] });
+  assert.equal(nodes(g, "ReferenceLatent").length, 2);
+  assert.equal(input(g, "LoraLoaderModelOnly", "strength_model"), 0.7);
+  assert.equal(nodes(g, "LoraLoader").length, 0);
+  assert.throws(() => W.buildGenerate(FLUX2(), MODELS, { strength: 1, seed: 1, width: 64, height: 64,
+    controls: [{ mode: "depth", image: "d.png", strength: 1 }] }), /reference/);
+  const up = W.buildUpscale(FLUX2(), MODELS, { image: "a", width: 2048, height: 2048, refine: true, strength: 0.3, seed: 1 });
+  assert.equal(input(up, "SplitSigmasDenoise", "denoise"), 0.3);
+  assert.deepEqual(nodes(up, "Flux2Scheduler")[0].inputs, { steps: 20, width: 2048, height: 2048 });
 });
 
 test("Ukrainian strings", () => {

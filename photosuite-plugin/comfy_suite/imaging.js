@@ -22,7 +22,8 @@
     else if (pixels > target * maxFactor) s = Math.sqrt(target * maxFactor / pixels);
     var gw = width * s, gh = height * s, shortest = Math.min(gw, gh);
     if (shortest < minSide) { gw *= minSide / shortest; gh *= minSide / shortest; }
-    return { width: multipleOf(gw), height: multipleOf(gh) };
+    // Multiples of 16: Flux 2 latents are 1/16 of the image (and 16 suits SD/Flux 1 too).
+    return { width: multipleOf(gw, 16), height: multipleOf(gh, 16) };
   }
 
   function inpaintContext(sel, canvas, padding, minPadding) {

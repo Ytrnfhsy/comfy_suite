@@ -159,3 +159,18 @@ def test_upscale_opens_a_new_document(ps):
     f.click("#ws-upscale button.primary")
     assert _wait(lambda: f.evaluate("CS.host.evalScript('app.documents.length')") == "2", 30), f.inner_text("#message")
     assert f.evaluate("CS.host.composite().then(d => d.width + 'x' + d.height)") == "800x600"
+
+
+def test_flux2_fill_selection(ps):
+    h, f, fake = ps
+    f.select_option("#style", "Flux 2 Dev")
+    f.evaluate("CS.host.runScript('app.activeDocument.selection.select([[100,50],[200,50],[200,150],[100,150]])')")
+    assert _wait(lambda: f.evaluate("CS.host.selectionMask().then(s => !!s)"))
+    _generate_and_apply(f, "a red ball")
+    kinds = {n["class_type"] for n in fake.prompts[-1].values()}
+    assert {"UNETLoader", "CLIPLoader", "SamplerCustomAdvanced", "Flux2Scheduler", "SetLatentNoiseMask", "ReferenceLatent"} <= kinds
+    assert "KSampler" not in kinds and "CheckpointLoaderSimple" not in kinds
+    latent_sizes = [im.size for im in fake.uploads.values()]
+    assert all(w % 16 == 0 and hh % 16 == 0 for w, hh in latent_sizes)
+    assert _pixel(f, 150, 100) == [220, 40, 40, 255]
+    assert _pixel(f, 20, 20) == [255, 255, 255, 255]

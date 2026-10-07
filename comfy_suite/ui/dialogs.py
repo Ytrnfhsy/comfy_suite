@@ -187,6 +187,10 @@ class StyleDialog(QDialog):
         self.arch.setCurrentIndex(max(0, self.arch.findData(style.architecture)))
         self.checkpoint = self._combo([("", tr("Auto"))] + [(c, c) for c in m.checkpoints], style.checkpoint)
         self.vae = self._combo([("", tr("From checkpoint"))] + [(v, v) for v in m.vaes], style.vae)
+        self.diffusion_model = self._combo([("", tr("Auto"))] + [(x, x) for x in m.diffusion_models], style.diffusion_model)
+        self.text_encoder = self._combo([("", tr("Auto"))] + [(x, x) for x in m.text_encoders], style.text_encoder)
+        self.flux2_reference = QCheckBox(tr("Use the canvas as a reference when refining"))
+        self.flux2_reference.setChecked(style.flux2_reference)
         self.style_prompt = QPlainTextEdit(style.style_prompt)
         self.style_prompt.setFixedHeight(60)
         self.negative = QPlainTextEdit(style.negative_prompt)
@@ -219,6 +223,10 @@ class StyleDialog(QDialog):
         form.addRow(tr("Architecture"), self.arch)
         form.addRow(tr("Checkpoint"), self.checkpoint)
         form.addRow(tr("VAE"), self.vae)
+        form.addRow("", QLabel(tr("Flux 2: separate model files (the checkpoint is not used)")))
+        form.addRow(tr("Diffusion model"), self.diffusion_model)
+        form.addRow(tr("Text encoder"), self.text_encoder)
+        form.addRow("", self.flux2_reference)
         form.addRow(tr("Style prompt"), self.style_prompt)
         form.addRow(tr("Negative prompt"), self.negative)
         form.addRow(tr("Sampler"), self.sampler)
@@ -307,6 +315,9 @@ class StyleDialog(QDialog):
             architecture=self.arch.currentData(),
             checkpoint=self.checkpoint.currentData() or "",
             vae=self.vae.currentData() or "",
+            diffusion_model=self.diffusion_model.currentData() or "",
+            text_encoder=self.text_encoder.currentData() or "",
+            flux2_reference=self.flux2_reference.isChecked(),
             loras=loras,
             style_prompt=self.style_prompt.toPlainText().strip() or "{prompt}",
             negative_prompt=self.negative.toPlainText().strip(),

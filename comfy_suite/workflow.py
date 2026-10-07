@@ -191,6 +191,8 @@ class Loaded:
 
 
 def load_model(g: Graph, style: Style, models: ServerModels) -> Loaded:
+    if style.architecture == "flux2":
+        return load_flux2(g, style, models)
     try:
         ckpt = style.resolve_checkpoint(models)
     except ValueError as e:
@@ -200,6 +202,8 @@ def load_model(g: Graph, style: Style, models: ServerModels) -> Loaded:
         from .styles import guess_architecture
 
         arch = guess_architecture(ckpt) or "sdxl"
+    if arch == "flux2":
+        raise WorkflowError("Flux 2 has no all-in-one checkpoint: set the style's architecture to flux2")
     loader = g.add("CheckpointLoaderSimple", ckpt_name=ckpt)
     model, clip, vae = loader[0], loader[1], loader[2]
     if style.vae:
@@ -207,8 +211,7 @@ def load_model(g: Graph, style: Style, models: ServerModels) -> Loaded:
     for lora in style.loras:
         if not lora.enabled:
             continue
-        if models.loras and lora.name not in models.loras:
-            raise WorkflowError(f"LoRA `{lora.name}` is not installed on the server")
+        _check_lora(models, lora.name)
         l = g.add("LoraLoader", model=model, clip=clip, lora_name=lora.name, strength_model=lora.strength, strength_clip=lora.strength)
         model, clip = l[0], l[1]
     if arch == "sd15" and style.clip_skip > 1:
@@ -216,13 +219,93 @@ def load_model(g: Graph, style: Style, models: ServerModels) -> Loaded:
     return Loaded(model, clip, vae, arch)
 
 
+def _check_lora(models: ServerModels, name: str) -> None:
+    if models.loras and name not in models.loras:
+        raise WorkflowError(f"LoRA `{name}` is not installed on the server")
+
+
+def load_flux2(g: Graph, style: Style, models: ServerModels) -> Loaded:
+    """Flux 2 as in ComfyUI's Flux.2 templates: diffusion model + text encoder (CLIPLoader type
+    flux2) + the Flux 2 VAE; LoRAs patch the model only."""
+    try:
+        unet, clip_name, vae_name = style.resolve_flux2(models)
+    except ValueError as e:
+        raise WorkflowError(str(e)) from e
+    model = g.add("UNETLoader", unet_name=unet, weight_dtype="default").out
+    clip = g.add("CLIPLoader", clip_name=clip_name, type="flux2").out
+    vae = g.add("VAELoader", vae_name=vae_name).out
+    for lora in style.loras:
+        if not lora.enabled:
+            continue
+        _check_lora(models, lora.name)
+        model = g.add("LoraLoaderModelOnly", model=model, lora_name=lora.name, strength_model=lora.strength).out
+    return Loaded(model, clip, vae, "flux2")
+
+
 def encode_prompts(g: Graph, m: Loaded, style: Style, prompt: str, negative: str) -> tuple[Out, Out]:
     positive = g.add("CLIPTextEncode", "Prompt", clip=m.clip, text=style.apply_prompt(prompt)).out
     neg_text = ", ".join(x for x in (style.negative_prompt.strip(), negative.strip()) if x)
     negative_c = g.add("CLIPTextEncode", "Negative", clip=m.clip, text=neg_text).out
-    if m.arch == "flux":
+    if m.arch in ("flux", "flux2"):
         positive = g.add("FluxGuidance", conditioning=positive, guidance=style.guidance).out
     return positive, negative_c
+
+
+def add_reference(g: Graph, m: Loaded, positive: Out, negative: Out, pixels: Out) -> tuple[Out, Out]:
+    """Flux 2 reads reference images natively: their latents ride on the conditioning."""
+    latent = g.add("VAEEncode", pixels=pixels, vae=m.vae).out
+    return g.add("ReferenceLatent", conditioning=positive, latent=latent).out, g.add("ReferenceLatent", conditioning=negative, latent=latent).out
+
+
+@dataclass
+class SampleArgs:
+    model: Out
+    positive: Out
+    negative: Out
+    latent: Out
+    seed: int
+    steps: int
+    cfg: float
+    sampler: str
+    scheduler: str
+    denoise: float
+    width: int
+    height: int
+
+
+def sample(g: Graph, m: Loaded, o: SampleArgs) -> Out:
+    """One sampling pass: KSampler for SD/Flux 1; for Flux 2 the custom-sampler chain of the
+    ComfyUI templates (Flux2Scheduler; BasicGuider, or CFGGuider when cfg > 1), with the
+    schedule cut to ``denoise`` when refining."""
+    if m.arch != "flux2":
+        return g.add(
+            "KSampler",
+            model=o.model,
+            positive=o.positive,
+            negative=o.negative,
+            latent_image=o.latent,
+            seed=o.seed,
+            steps=o.steps,
+            cfg=o.cfg,
+            sampler_name=o.sampler,
+            scheduler=o.scheduler,
+            denoise=o.denoise,
+        ).out
+    sigmas = g.add("Flux2Scheduler", steps=o.steps, width=o.width, height=o.height).out
+    if o.denoise < 1:
+        sigmas = g.add("SplitSigmasDenoise", sigmas=sigmas, denoise=o.denoise)[1]
+    if o.cfg > 1:
+        guider = g.add("CFGGuider", model=o.model, positive=o.positive, negative=o.negative, cfg=o.cfg).out
+    else:
+        guider = g.add("BasicGuider", model=o.model, conditioning=o.positive).out
+    return g.add(
+        "SamplerCustomAdvanced",
+        noise=g.add("RandomNoise", noise_seed=o.seed).out,
+        guider=guider,
+        sampler=g.add("KSamplerSelect", sampler_name=o.sampler).out,
+        sigmas=sigmas,
+        latent_image=o.latent,
+    )[0]
 
 
 def apply_controls(
@@ -234,6 +317,11 @@ def apply_controls(
             continue
         image = g.add("LoadImage", f"Control {c.mode}", image=c.image).out
         image = g.add("ImageScale", image=image, upscale_method="lanczos", width=width, height=height, crop="disabled").out
+        if m.arch == "flux2":
+            if c.mode != "reference":
+                raise WorkflowError("Flux 2: ControlNet is not supported yet; use the reference mode (Flux 2 reads reference images natively)")
+            positive, negative = add_reference(g, m, positive, negative, image)
+            continue
         if c.mode == "reference":
             if not models.has("IPAdapterUnifiedLoader", "IPAdapterAdvanced"):
                 raise WorkflowError("reference images need the ComfyUI_IPAdapter_plus nodes on the server")
@@ -285,7 +373,20 @@ def build_generate(style: Style, models: ServerModels, req: GenerateRequest) -> 
     # The controller uploads the region and mask already resized to the generation size.
     pixels = g.add("LoadImage", "Canvas", image=req.image).out if req.image else None
 
-    if req.mask and pixels is not None:
+    if m.arch == "flux2":
+        if pixels is not None:
+            # The region as context (a reference latent), its latent as the start, the selection
+            # as a noise mask: Flux 2 repaints the masked part consistently with the rest.
+            if style.flux2_reference:
+                positive, negative = add_reference(g, m, positive, negative, pixels)
+            latent = g.add("VAEEncode", pixels=pixels, vae=m.vae).out
+            if req.mask:
+                fmask = g.add("LoadImageMask", "Mask", image=req.mask, channel="red").out
+                latent = g.add("SetLatentNoiseMask", samples=latent, mask=fmask).out
+        else:
+            latent = g.add("EmptyFlux2LatentImage", width=req.width, height=req.height, batch_size=batch).out
+            batch = 1
+    elif req.mask and pixels is not None:
         mask = g.add("LoadImageMask", "Mask", image=req.mask, channel="red").out
         cond = g.add("InpaintModelConditioning", positive=positive, negative=negative, vae=m.vae, pixels=pixels, mask=mask, noise_mask=True)
         positive, negative, latent = cond[0], cond[1], cond[2]
@@ -298,23 +399,25 @@ def build_generate(style: Style, models: ServerModels, req: GenerateRequest) -> 
     if batch > 1:
         latent = g.add("RepeatLatentBatch", samples=latent, amount=batch).out
 
-    sampler = style.live_sampler if req.live else style.sampler
-    scheduler = style.live_scheduler if req.live else style.scheduler
-    steps = style.live_steps if req.live else style.steps
-    cfg = style.live_cfg if req.live else style.cfg
-    sampled = g.add(
-        "KSampler",
-        model=model,
-        positive=positive,
-        negative=negative,
-        latent_image=latent,
-        seed=resolve_seed(req.seed),
-        steps=steps,
-        cfg=cfg,
-        sampler_name=sampler,
-        scheduler=scheduler,
-        denoise=max(0.01, min(1.0, req.strength)),
-    ).out
+    live = req.live
+    sampled = sample(
+        g,
+        m,
+        SampleArgs(
+            model=model,
+            positive=positive,
+            negative=negative,
+            latent=latent,
+            seed=resolve_seed(req.seed),
+            steps=style.live_steps if live else style.steps,
+            cfg=style.live_cfg if live else style.cfg,
+            sampler=style.live_sampler if live else style.sampler,
+            scheduler=style.live_scheduler if live else style.scheduler,
+            denoise=max(0.01, min(1.0, req.strength)),
+            width=req.width,
+            height=req.height,
+        ),
+    )
     decoded = g.add("VAEDecode", samples=sampled, vae=m.vae).out
     g.add("PreviewImage", "Result", images=decoded)
     return g
@@ -344,19 +447,24 @@ def build_upscale(style: Style, models: ServerModels, req: UpscaleRequest) -> Gr
         m = load_model(g, style, models)
         positive, negative = encode_prompts(g, m, style, req.prompt, "")
         latent = g.add("VAEEncodeTiled", pixels=image, vae=m.vae, tile_size=req.tile_size, overlap=64).out
-        sampled = g.add(
-            "KSampler",
-            model=m.model,
-            positive=positive,
-            negative=negative,
-            latent_image=latent,
-            seed=resolve_seed(req.seed),
-            steps=style.steps,
-            cfg=style.cfg,
-            sampler_name=style.sampler,
-            scheduler=style.scheduler,
-            denoise=max(0.01, min(1.0, req.strength)),
-        ).out
+        sampled = sample(
+            g,
+            m,
+            SampleArgs(
+                model=m.model,
+                positive=positive,
+                negative=negative,
+                latent=latent,
+                seed=resolve_seed(req.seed),
+                steps=style.steps,
+                cfg=style.cfg,
+                sampler=style.sampler,
+                scheduler=style.scheduler,
+                denoise=max(0.01, min(1.0, req.strength)),
+                width=req.width,
+                height=req.height,
+            ),
+        )
         image = g.add("VAEDecodeTiled", samples=sampled, vae=m.vae, tile_size=req.tile_size, overlap=64).out
     g.add("PreviewImage", "Result", images=image)
     return g

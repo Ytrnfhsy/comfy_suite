@@ -37,6 +37,8 @@
     return {
       checkpoints: choices(info, "CheckpointLoaderSimple", "ckpt_name"),
       vaes: choices(info, "VAELoader", "vae_name"),
+      diffusion_models: choices(info, "UNETLoader", "unet_name"),
+      text_encoders: choices(info, "CLIPLoader", "clip_name"),
       loras: choices(info, "LoraLoader", "lora_name"),
       controlnets: choices(info, "ControlNetLoader", "control_net_name"),
       upscalers: choices(info, "UpscaleModelLoader", "model_name"),
@@ -110,14 +112,16 @@
   function resolveSeed(seed) { return seed >= 0 ? seed : Math.floor(Math.random() * 2147483647); }
 
   function loadModel(g, style, models) {
+    if (style.architecture === "flux2") return loadFlux2(g, style, models);
     var ckpt = CS.styles.resolveCheckpoint(style, models);
     var arch = style.architecture !== "auto" ? style.architecture : (CS.styles.guessArchitecture(ckpt) || "sdxl");
+    if (arch === "flux2") throw new Error("Flux 2 has no all-in-one checkpoint: set the style's architecture to flux2");
     var loader = g.add("CheckpointLoaderSimple", { ckpt_name: ckpt });
     var model = loader.out(0), clip = loader.out(1), vae = loader.out(2);
     if (style.vae) vae = g.add("VAELoader", { vae_name: style.vae }).out();
     (style.loras || []).forEach(function (l) {
       if (l.enabled === false) return;
-      if (models.loras.length && models.loras.indexOf(l.name) < 0) throw new Error("LoRA `" + l.name + "` is not installed on the server");
+      checkLora(models, l);
       var n = g.add("LoraLoader", { model: model, clip: clip, lora_name: l.name, strength_model: l.strength, strength_clip: l.strength });
       model = n.out(0); clip = n.out(1);
     });
@@ -125,12 +129,62 @@
     return { model: model, clip: clip, vae: vae, arch: arch };
   }
 
+  function checkLora(models, l) {
+    if (models.loras.length && models.loras.indexOf(l.name) < 0) throw new Error("LoRA `" + l.name + "` is not installed on the server");
+  }
+
+  /* Flux 2: diffusion model + text encoder (CLIPLoader type flux2) + Flux 2 VAE, as in
+     ComfyUI's own Flux.2 templates. LoRAs patch the model only. */
+  function loadFlux2(g, style, models) {
+    var files = CS.styles.resolveFlux2(style, models);
+    var model = g.add("UNETLoader", { unet_name: files.unet, weight_dtype: "default" }).out();
+    var clip = g.add("CLIPLoader", { clip_name: files.clip, type: "flux2" }).out();
+    var vae = g.add("VAELoader", { vae_name: files.vae }).out();
+    (style.loras || []).forEach(function (l) {
+      if (l.enabled === false) return;
+      checkLora(models, l);
+      model = g.add("LoraLoaderModelOnly", { model: model, lora_name: l.name, strength_model: l.strength }).out();
+    });
+    return { model: model, clip: clip, vae: vae, arch: "flux2" };
+  }
+
   function encodePrompts(g, m, style, prompt, negative) {
     var positive = g.add("CLIPTextEncode", { clip: m.clip, text: CS.styles.applyPrompt(style, prompt) }, "Prompt").out();
     var negText = [(style.negative_prompt || "").trim(), (negative || "").trim()].filter(Boolean).join(", ");
     var neg = g.add("CLIPTextEncode", { clip: m.clip, text: negText }, "Negative").out();
-    if (m.arch === "flux") positive = g.add("FluxGuidance", { conditioning: positive, guidance: style.guidance }).out();
+    if (m.arch === "flux" || m.arch === "flux2") positive = g.add("FluxGuidance", { conditioning: positive, guidance: style.guidance }).out();
     return [positive, neg];
+  }
+
+  /* Flux 2 reads reference images natively: their latents ride on the conditioning. */
+  function addReference(g, m, positive, negative, pixels) {
+    var latent = g.add("VAEEncode", { pixels: pixels, vae: m.vae }).out();
+    return [g.add("ReferenceLatent", { conditioning: positive, latent: latent }).out(),
+      g.add("ReferenceLatent", { conditioning: negative, latent: latent }).out()];
+  }
+
+  /* One sampling pass. SD/Flux 1 use KSampler; Flux 2 uses the custom-sampler chain of the
+     ComfyUI templates (Flux2Scheduler, BasicGuider or CFGGuider when cfg > 1), with the
+     schedule cut to `denoise` for refining. */
+  function sample(g, m, o) {
+    if (m.arch !== "flux2") {
+      return g.add("KSampler", {
+        model: o.model, positive: o.positive, negative: o.negative, latent_image: o.latent, seed: o.seed,
+        steps: o.steps, cfg: o.cfg, sampler_name: o.sampler, scheduler: o.scheduler, denoise: o.denoise
+      }).out();
+    }
+    var sigmas = g.add("Flux2Scheduler", { steps: o.steps, width: o.width, height: o.height }).out();
+    if (o.denoise < 1) sigmas = g.add("SplitSigmasDenoise", { sigmas: sigmas, denoise: o.denoise }).out(1);
+    var guider = o.cfg > 1
+      ? g.add("CFGGuider", { model: o.model, positive: o.positive, negative: o.negative, cfg: o.cfg }).out()
+      : g.add("BasicGuider", { model: o.model, conditioning: o.positive }).out();
+    return g.add("SamplerCustomAdvanced", {
+      noise: g.add("RandomNoise", { noise_seed: o.seed }).out(),
+      guider: guider,
+      sampler: g.add("KSamplerSelect", { sampler_name: o.sampler }).out(),
+      sigmas: sigmas,
+      latent_image: o.latent
+    }).out(0);
   }
 
   function applyControls(g, m, models, controls, positive, negative, width, height) {
@@ -139,6 +193,12 @@
       if (!(c.strength > 0)) return;
       var image = g.add("LoadImage", { image: c.image }, "Control " + c.mode).out();
       image = g.add("ImageScale", { image: image, upscale_method: "lanczos", width: width, height: height, crop: "disabled" }).out();
+      if (m.arch === "flux2") {
+        if (c.mode !== "reference") throw new Error("Flux 2: ControlNet is not supported yet; use the reference mode (Flux 2 reads reference images natively)");
+        var refs = addReference(g, m, positive, negative, image);
+        positive = refs[0]; negative = refs[1];
+        return;
+      }
       if (c.mode === "reference") {
         if (!hasNodes(models, "IPAdapterUnifiedLoader", "IPAdapterAdvanced")) throw new Error("reference images need the ComfyUI_IPAdapter_plus nodes on the server");
         var loader = g.add("IPAdapterUnifiedLoader", { model: model, preset: "PLUS (high strength)" });
@@ -170,8 +230,26 @@
     var model = c[0], positive = c[1], negative = c[2];
     var batch = Math.max(1, Math.min(16, req.batch || 1));
     var pixels = req.image ? g.add("LoadImage", { image: req.image }, "Canvas").out() : null;
-    var latent;
-    if (req.mask && pixels) {
+    var live = !!req.live;
+    var latent, denoise = Math.max(0.01, Math.min(1, req.strength));
+    if (m.arch === "flux2") {
+      if (pixels) {
+        // The region as context (a reference latent), its latent as the start, the selection
+        // as a noise mask: Flux 2 repaints the masked part consistently with the rest.
+        if (style.flux2_reference !== false) {
+          var refs = addReference(g, m, positive, negative, pixels);
+          positive = refs[0]; negative = refs[1];
+        }
+        latent = g.add("VAEEncode", { pixels: pixels, vae: m.vae }).out();
+        if (req.mask) {
+          var fmask = g.add("LoadImageMask", { image: req.mask, channel: "red" }, "Mask").out();
+          latent = g.add("SetLatentNoiseMask", { samples: latent, mask: fmask }).out();
+        }
+      } else {
+        latent = g.add("EmptyFlux2LatentImage", { width: req.width, height: req.height, batch_size: batch }).out();
+        batch = 1;
+      }
+    } else if (req.mask && pixels) {
       var mask = g.add("LoadImageMask", { image: req.mask, channel: "red" }, "Mask").out();
       var cond = g.add("InpaintModelConditioning", { positive: positive, negative: negative, vae: m.vae, pixels: pixels, mask: mask, noise_mask: true });
       positive = cond.out(0); negative = cond.out(1); latent = cond.out(2);
@@ -182,13 +260,12 @@
       batch = 1;
     }
     if (batch > 1) latent = g.add("RepeatLatentBatch", { samples: latent, amount: batch }).out();
-    var live = !!req.live;
-    var sampled = g.add("KSampler", {
-      model: model, positive: positive, negative: negative, latent_image: latent, seed: req.seed,
+    var sampled = sample(g, m, {
+      model: model, positive: positive, negative: negative, latent: latent, seed: req.seed,
       steps: live ? style.live_steps : style.steps, cfg: live ? style.live_cfg : style.cfg,
-      sampler_name: live ? style.live_sampler : style.sampler, scheduler: live ? style.live_scheduler : style.scheduler,
-      denoise: Math.max(0.01, Math.min(1, req.strength))
-    }).out();
+      sampler: live ? style.live_sampler : style.sampler, scheduler: live ? style.live_scheduler : style.scheduler,
+      denoise: denoise, width: req.width, height: req.height
+    });
     var decoded = g.add("VAEDecode", { samples: sampled, vae: m.vae }).out();
     g.add("PreviewImage", { images: decoded }, "Result");
     return g;
@@ -206,11 +283,11 @@
       var m = loadModel(g, style, models);
       var p = encodePrompts(g, m, style, req.prompt || "", "");
       var latent = g.add("VAEEncodeTiled", { pixels: image, vae: m.vae, tile_size: 1024, overlap: 64 }).out();
-      var sampled = g.add("KSampler", {
-        model: m.model, positive: p[0], negative: p[1], latent_image: latent, seed: req.seed,
-        steps: style.steps, cfg: style.cfg, sampler_name: style.sampler, scheduler: style.scheduler,
-        denoise: Math.max(0.01, Math.min(1, req.strength))
-      }).out();
+      var sampled = sample(g, m, {
+        model: m.model, positive: p[0], negative: p[1], latent: latent, seed: req.seed,
+        steps: style.steps, cfg: style.cfg, sampler: style.sampler, scheduler: style.scheduler,
+        denoise: Math.max(0.01, Math.min(1, req.strength)), width: req.width, height: req.height
+      });
       image = g.add("VAEDecodeTiled", { samples: sampled, vae: m.vae, tile_size: 1024, overlap: 64 }).out();
     }
     g.add("PreviewImage", { images: image }, "Result");
