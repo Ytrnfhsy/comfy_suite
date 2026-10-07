@@ -47,13 +47,19 @@ def _open_document(h):
     time.sleep(2)
 
 
+@pytest.fixture(params=["*", "null"], ids=["cors-any", "cors-null"])
+def cors(request):
+    """--enable-cors-header (any origin) and --enable-cors-header null (only sandboxed pages)."""
+    return request.param
+
+
 @pytest.fixture
-def ps():
+def ps(cors):
     pytest.importorskip("playwright")
     from fake_comfy import FakeComfy
     from harness import Harness
 
-    with FakeComfy(color=(220, 40, 40), cors=True) as fake:
+    with FakeComfy(color=(220, 40, 40), cors=cors) as fake:
         h = Harness(Path(WEB))
         try:
             h.open()

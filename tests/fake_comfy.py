@@ -53,7 +53,7 @@ OBJECT_INFO: dict[str, Any] = {
 
 
 class FakeComfy:
-    def __init__(self, color: tuple[int, int, int] = (200, 30, 30), fail: str | None = None, cors: bool = False):
+    def __init__(self, color: tuple[int, int, int] = (200, 30, 30), fail: str | None = None, cors: bool | str = False):
         self.cors = cors
         self.color = color
         self.fail = fail
@@ -138,7 +138,7 @@ class FakeComfy:
 
             def end_headers(self) -> None:
                 if fake.cors:  # what ComfyUI sends with --enable-cors-header
-                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Access-Control-Allow-Origin", fake.cors if isinstance(fake.cors, str) else "*")
                     self.send_header("Access-Control-Allow-Methods", "POST, GET, DELETE, PUT, OPTIONS, PATCH")
                     self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
                 super().end_headers()
