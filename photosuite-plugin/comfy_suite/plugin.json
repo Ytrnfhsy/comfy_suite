@@ -1,0 +1,11 @@
+{
+  "id": "comfy_suite",
+  "name": "ComfySuite AI",
+  "version": "0.2.0",
+  "entry": "index.html",
+  "icon": "icon.svg",
+  "width": 340,
+  "height": 720,
+  "themed": true,
+  "minAppVersion": "0.9.14"
+}

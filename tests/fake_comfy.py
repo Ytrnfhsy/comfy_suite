@@ -53,7 +53,8 @@ OBJECT_INFO: dict[str, Any] = {
 
 
 class FakeComfy:
-    def __init__(self, color: tuple[int, int, int] = (200, 30, 30), fail: str | None = None):
+    def __init__(self, color: tuple[int, int, int] = (200, 30, 30), fail: str | None = None, cors: bool = False):
+        self.cors = cors
         self.color = color
         self.fail = fail
         self.uploads: dict[str, Image.Image] = {}
@@ -134,6 +135,18 @@ class FakeComfy:
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *args: object) -> None:
                 pass
+
+            def end_headers(self) -> None:
+                if fake.cors:  # what ComfyUI sends with --enable-cors-header
+                    self.send_header("Access-Control-Allow-Origin", "*")
+                    self.send_header("Access-Control-Allow-Methods", "POST, GET, DELETE, PUT, OPTIONS, PATCH")
+                    self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+                super().end_headers()
+
+            def do_OPTIONS(self) -> None:  # noqa: N802
+                self.send_response(200)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
 
             def _json(self, obj: Any, code: int = 200) -> None:
                 body = json.dumps(obj).encode()

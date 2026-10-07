@@ -1,0 +1,65 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1.35;
+  --line: color-mix(in srgb, CanvasText 22%, transparent);
+  --soft: color-mix(in srgb, CanvasText 7%, transparent);
+  --accent: #3b82f6;
+}
+:root.light { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; padding: 8px; background: transparent; color: CanvasText; }
+#app { display: flex; flex-direction: column; gap: 6px; }
+.hidden { display: none !important; }
+header { display: flex; align-items: center; gap: 6px; }
+nav { display: flex; flex: 1; gap: 2px; flex-wrap: wrap; }
+nav button { flex: 1 1 auto; padding: 4px 6px; border-radius: 4px; }
+nav button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.status { width: 10px; height: 10px; border-radius: 50%; flex: none; cursor: pointer; background: #999; }
+.status.ok { background: #22c55e; } .status.error { background: #ef4444; } .status.busy { background: #f59e0b; }
+section { display: flex; flex-direction: column; gap: 6px; }
+textarea, input[type=text], input[type=number], select {
+  width: 100%; font: inherit; color: inherit; background: var(--soft);
+  border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px;
+}
+textarea { resize: vertical; }
+input.narrow { width: 64px; flex: none; }
+button {
+  font: inherit; color: inherit; background: var(--soft); border: 1px solid var(--line);
+  border-radius: 4px; padding: 5px 8px; cursor: pointer;
+}
+button:hover:not(:disabled) { background: color-mix(in srgb, CanvasText 14%, transparent); }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; padding: 7px; font-weight: 600; }
+button.small { padding: 2px 7px; flex: none; }
+button.link { background: none; border: none; color: var(--accent); text-align: left; padding: 2px 0; }
+.row { display: grid; grid-template-columns: 92px 1fr; align-items: center; gap: 6px; }
+.inline { display: flex; align-items: center; gap: 6px; }
+.inline select, .inline input[type=text] { flex: 1; min-width: 0; }
+.inline label { white-space: nowrap; }
+.grow { flex: 1; }
+.prompt-row { display: flex; gap: 4px; align-items: flex-start; }
+.slider { display: flex; align-items: center; gap: 6px; flex: 1; }
+.slider input { flex: 1; min-width: 0; }
+.slider .value { width: 36px; text-align: right; opacity: .8; }
+.controls { display: flex; flex-direction: column; gap: 6px; }
+.control { border: 1px solid var(--line); border-radius: 6px; padding: 6px; display: flex; flex-direction: column; gap: 4px; }
+.style-row span { flex: none; }
+.editor { border: 1px solid var(--line); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 5px; }
+.progress { display: flex; gap: 6px; align-items: center; }
+.progress .bar { position: relative; flex: 1; height: 18px; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+#progress-bar { position: absolute; inset: 0 auto 0 0; width: 0; background: color-mix(in srgb, var(--accent) 45%, transparent); transition: width .2s; }
+#progress-text { position: relative; padding: 0 6px; line-height: 16px; font-size: 11px; white-space: nowrap; }
+.message { white-space: pre-wrap; font-size: 11px; opacity: .85; }
+.message.error { color: #ef4444; opacity: 1; }
+.hint { font-size: 11px; opacity: .7; }
+#results { display: flex; flex-direction: column; gap: 6px; }
+.preview, .live-preview { width: 100%; max-height: 260px; object-fit: contain; border-radius: 4px;
+  background: repeating-conic-gradient(var(--soft) 0 25%, transparent 0 50%) 0 0 / 16px 16px; }
+.live-preview:not([src]) { display: none; }
+.history { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 4px; }
+.history img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 4px; cursor: pointer; border: 2px solid transparent; }
+.history img.selected { border-color: var(--accent); }
+.custom-fields { display: flex; flex-direction: column; gap: 6px; }
+.control input.narrow { width: 50px; }
