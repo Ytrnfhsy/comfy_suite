@@ -15,10 +15,11 @@
 
   var MODES = ["auto", "fill", "expand", "add", "remove", "background", "custom"];
 
-  // Flux 2 is an edit model: these instructions, with the region as a reference image, steer it.
+  // Flux 2 is an edit model: the region is its reference image and these instructions steer it
+  // (the same ones Krita's AI plugin uses).
   var FLUX2_INSTRUCTIONS = {
-    fill: "Fill the green spaces according to the image.",
-    expand: "Expand the image to fill the green spaces.",
+    green: "Fill the green spaces according to the image.",
+    expand: "Expand the image to fill the empty canvas.",
     add: "Add the object to the scene.",
     remove: "Remove the object.",
     background: "Replace the background while keeping the main subject."
@@ -30,24 +31,33 @@
   }
 
   /* How to prepare a request for `mode` (already resolved) at `strength` with architecture `arch`.
-     Returns { mode, fill: "blur"|"border"|"neutral"|"none", referenceFill: "green"|null,
-               invert, featherScale, context: "auto"|"mask"|"image", instruction, defaultPrompt } */
+     opts: { context, flux2Outpaint: an outpaint LoRA for this Flux 2 model is installed }
+     Returns { mode, fill: "blur"|"border"|"neutral"|"green"|"none", invert, featherScale,
+               context: "auto"|"mask"|"image", instruction, defaultPrompt, outpaintLora } */
   function plan(mode, arch, strength, opts) {
     opts = opts || {};
-    var flux2 = arch === "flux2";
-    var p = { mode: mode, fill: "none", referenceFill: null, invert: false, featherScale: 1, context: "auto", instruction: "", defaultPrompt: "" };
+    var p = { mode: mode, fill: "none", invert: false, featherScale: 1, context: "auto", instruction: "", defaultPrompt: "", outpaintLora: false };
     if (strength < 1) { p.mode = "refine"; return p; }
     switch (mode) {
       case "fill": p.fill = "blur"; break;
       case "expand": p.fill = "border"; p.featherScale = 0.5; break;
       case "add": p.fill = "neutral"; break;
-      case "remove": p.fill = "border"; p.defaultPrompt = flux2 ? "" : "background scenery"; break;
+      case "remove": p.fill = "border"; p.defaultPrompt = "background scenery"; break;
       case "background": p.fill = "neutral"; p.invert = true; p.featherScale = 0.1; p.context = "image"; break;
       case "custom": p.context = opts.context || "auto"; break;
     }
-    if (flux2 && FLUX2_INSTRUCTIONS[mode]) {
-      p.instruction = FLUX2_INSTRUCTIONS[mode];
-      if (mode === "fill" || mode === "expand") p.referenceFill = "green";
+    if (arch === "flux2") {
+      // Flux 2 edits from its reference (the region itself): no pre-fill, except the green
+      // marking an outpaint LoRA was trained on. Without that LoRA green would just be copied.
+      p.fill = "none";
+      p.defaultPrompt = "";
+      if ((mode === "fill" || mode === "expand") && opts.flux2Outpaint) {
+        p.fill = "green";
+        p.instruction = FLUX2_INSTRUCTIONS.green;
+        p.outpaintLora = true;
+      } else if (mode !== "fill" && FLUX2_INSTRUCTIONS[mode]) {
+        p.instruction = FLUX2_INSTRUCTIONS[mode];
+      }
     }
     return p;
   }

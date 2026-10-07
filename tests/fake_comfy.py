@@ -32,7 +32,8 @@ OBJECT_INFO: dict[str, Any] = {
     "SamplerCustomAdvanced": {"input": {"required": {}}},
     "ReferenceLatent": {"input": {"required": {}}},
     "SetLatentNoiseMask": {"input": {"required": {}}},
-    "LoraLoader": {"input": {"required": {"lora_name": [["detail.safetensors"]], "strength_model": ["FLOAT", {"default": 1.0}], "strength_clip": ["FLOAT", {"default": 1.0}]}}},
+    "DifferentialDiffusion": {"input": {"required": {}}},
+    "LoraLoader": {"input": {"required": {"lora_name": [["detail.safetensors", "flux-2-klein-4B-outpaint-lora.safetensors"]], "strength_model": ["FLOAT", {"default": 1.0}], "strength_clip": ["FLOAT", {"default": 1.0}]}}},
     "ControlNetLoader": {"input": {"required": {"control_net_name": [["control_sd15_scribble.pth", "controlnet-union-sdxl-promax.safetensors"]]}}},
     "UpscaleModelLoader": {"input": {"required": {"model_name": [["4x-UltraSharp.pth"]]}}},
     "KSampler": {

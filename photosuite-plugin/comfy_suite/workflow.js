@@ -231,20 +231,23 @@
     var batch = Math.max(1, Math.min(16, req.batch || 1));
     var pixels = req.image ? g.add("LoadImage", { image: req.image }, "Canvas").out() : null;
     var live = !!req.live;
-    var latent, denoise = Math.max(0.01, Math.min(1, req.strength));
+    var latent, denoise = Math.max(0.01, Math.min(1, req.strength)), colorMatch = null;
     if (m.arch === "flux2") {
       if (pixels) {
-        // The region as context (a reference latent), its latent as the start, the selection
-        // as a noise mask: Flux 2 repaints the masked part consistently with the rest.
-        if (style.flux2_reference !== false || req.reference) {
-          var refPixels = req.reference ? g.add("LoadImage", { image: req.reference }, "Reference").out() : pixels;
-          var refs = addReference(g, m, positive, negative, refPixels);
-          positive = refs[0]; negative = refs[1];
-        }
+        // As Krita does: the region's latent is both where sampling starts (repainting only under
+        // the mask) and the reference image the edit model reads the scene from.
         latent = g.add("VAEEncode", { pixels: pixels, vae: m.vae }).out();
         if (req.mask) {
           var fmask = g.add("LoadImageMask", { image: req.mask, channel: "red" }, "Mask").out();
           latent = g.add("SetLatentNoiseMask", { samples: latent, mask: fmask }).out();
+          model = g.add("DifferentialDiffusion", { model: model }).out();
+          colorMatch = { reference: pixels, mask: fmask };
+        }
+        if (req.inpaintLora) model = g.add("LoraLoaderModelOnly", { model: model, lora_name: req.inpaintLora, strength_model: 1 }).out();
+        if (style.flux2_reference !== false || req.reference) {
+          var refLatent = req.reference ? g.add("VAEEncode", { pixels: g.add("LoadImage", { image: req.reference }, "Reference").out(), vae: m.vae }).out() : latent;
+          positive = g.add("ReferenceLatent", { conditioning: positive, latent: refLatent }).out();
+          negative = g.add("ReferenceLatent", { conditioning: negative, latent: refLatent }).out();
         }
       } else {
         latent = g.add("EmptyFlux2LatentImage", { width: req.width, height: req.height, batch_size: batch }).out();
@@ -268,6 +271,10 @@
       denoise: denoise, width: req.width, height: req.height
     });
     var decoded = g.add("VAEDecode", { samples: sampled, vae: m.vae }).out();
+    // Match the repainted area's colours to the surroundings when comfyui-inpaint-nodes is installed.
+    if (colorMatch && models.nodes.indexOf("INPAINT_ColorMatch") >= 0) {
+      decoded = g.add("INPAINT_ColorMatch", { target: decoded, reference: colorMatch.reference, exclude_mask: colorMatch.mask, strength: 1 }).out();
+    }
     g.add("PreviewImage", { images: decoded }, "Result");
     return g;
   }

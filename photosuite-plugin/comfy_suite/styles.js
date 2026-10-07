@@ -126,6 +126,14 @@
     return { unet: unet, clip: clip, vae: vae };
   }
 
+  /* The outpaint LoRA Krita uses for Flux 2 Klein 4B ("Fill the green spaces"), when installed. */
+  function flux2OutpaintLora(unet, models) {
+    if (!/klein/i.test(unet || "") || /9b|8b/i.test(unet)) return "";
+    var loras = models.loras || [];
+    for (var i = 0; i < loras.length; i++) if (/outpaint/i.test(loras[i]) && /klein|4b/i.test(loras[i])) return loras[i];
+    return "";
+  }
+
   function StyleLibrary(extra) {
     this.styles = [];
     var seen = {};
@@ -160,7 +168,7 @@
   CS.styles = {
     BUILTIN: BUILTIN, ARCHITECTURES: ["auto", "sd15", "sdxl", "flux", "flux2"], normalize: normalize,
     guessArchitecture: guessArchitecture, applyPrompt: applyPrompt, resolveCheckpoint: resolveCheckpoint,
-    resolveFlux2: resolveFlux2,
+    resolveFlux2: resolveFlux2, flux2OutpaintLora: flux2OutpaintLora,
     StyleLibrary: StyleLibrary
   };
 })(typeof window !== "undefined" ? (window.CS = window.CS || {}) : (globalThis.CS = globalThis.CS || {}));

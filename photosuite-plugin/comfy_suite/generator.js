@@ -56,10 +56,13 @@
         sel = IP.transparentMask(docRgba, doc.width, doc.height);
       }
       var arch = archOf(style, self.comfy.models);
-      var plan = null, region = docRect, regionMask = null, weight = null;
+      var plan = null, region = docRect, regionMask = null, weight = null, outpaintLora = "";
       if (sel) {
         mode = IP.resolveMode(mode, emptyShare(docRgba, doc.width, sel));
-        plan = IP.plan(mode, arch, params.strength, { context: params.context });
+        if (arch === "flux2") {
+          try { outpaintLora = CS.styles.flux2OutpaintLora(CS.styles.resolveFlux2(style, self.comfy.models).unet, self.comfy.models); } catch (e) { outpaintLora = ""; }
+        }
+        plan = IP.plan(mode, arch, params.strength, { context: params.context, flux2Outpaint: !!outpaintLora });
         if (plan.invert) sel = { rect: docRect, bytes: IP.invert(I.maskForRegion(sel.bytes, sel.rect, docRect)) };
         if (plan.context === "image") region = docRect;
         else if (plan.context === "mask") region = I.clampRect(sel.rect, docRect);
@@ -76,7 +79,8 @@
       var req = {
         prompt: plan ? IP.composePrompt(plan, params.prompt) : params.prompt,
         negative: params.negative, strength: params.strength, seed: seed,
-        batch: live ? 1 : params.batch, width: size.width, height: size.height, live: !!live, controls: []
+        batch: live ? 1 : params.batch, width: size.width, height: size.height, live: !!live, controls: [],
+        inpaintLora: plan && plan.outpaintLora ? outpaintLora : ""
       };
       var uploads = [];
       function upload(c, key) { uploads.push(self.upload(I.resize(c, size.width, size.height)).then(function (n) { req[key] = n; })); }
@@ -85,11 +89,6 @@
         var original = I.flatten(crop);
         if (plan && plan.fill !== "none") {
           upload(I.fromRgba(I.prefill(I.rgbaOf(crop), region.width, region.height, weight, plan.fill), region.width, region.height), "image");
-          // Flux 2 sees the scene through its reference image: the untouched region, or the
-          // region with the area to fill painted green when the instruction says so.
-          if (arch === "flux2") {
-            upload(plan.referenceFill ? I.fromRgba(I.prefill(I.rgbaOf(crop), region.width, region.height, weight, plan.referenceFill), region.width, region.height) : original, "reference");
-          }
         } else {
           upload(original, "image");
         }

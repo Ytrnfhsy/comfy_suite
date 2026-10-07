@@ -10,7 +10,7 @@ const { styles, workflow: W, imaging: I, inpaint: IP } = globalThis.CS;
 
 const INFO = {
   CheckpointLoaderSimple: { input: { required: { ckpt_name: [["sd15_dreamshaper.safetensors", "sdxl_base.safetensors", "flux1-dev.safetensors"]] } } },
-  LoraLoader: { input: { required: { lora_name: [["detail.safetensors"]] } } },
+  LoraLoader: { input: { required: { lora_name: [["detail.safetensors", "flux-2-klein-4B-outpaint-lora.safetensors"]] } } },
   ControlNetLoader: { input: { required: { control_net_name: [["control_sd15_scribble.pth", "controlnet-union-sdxl-promax.safetensors"]] } } },
   UpscaleModelLoader: { input: { required: { model_name: [["4x.pth"]] } } },
   KSampler: { input: { required: { sampler_name: [["euler", "dpmpp_2m"]], scheduler: ["COMBO", { options: ["normal", "karras"] }] } } },
@@ -181,9 +181,14 @@ test("inpaint modes are planned like Krita's", () => {
   assert.ok(bg.invert && bg.context === "image" && bg.featherScale < 1);
   assert.equal(IP.plan("fill", "sdxl", 0.5).mode, "refine");
   assert.equal(IP.plan("custom", "sdxl", 1, { context: "mask" }).context, "mask");
+  // Flux 2: no pre-fill; green only with the outpaint LoRA, as Krita does.
   const f2 = IP.plan("fill", "flux2", 1);
-  assert.equal(f2.referenceFill, "green");
-  assert.equal(IP.composePrompt(f2, "a lake"), "Fill the green spaces according to the image. a lake");
+  assert.equal(f2.fill, "none");
+  assert.equal(IP.composePrompt(f2, "a lake"), "a lake");
+  const f2l = IP.plan("expand", "flux2", 1, { flux2Outpaint: true });
+  assert.ok(f2l.fill === "green" && f2l.outpaintLora);
+  assert.equal(IP.composePrompt(f2l, ""), "Fill the green spaces according to the image.");
+  assert.equal(IP.composePrompt(IP.plan("expand", "flux2", 1), ""), "Expand the image to fill the empty canvas.");
   assert.equal(IP.composePrompt(IP.plan("remove", "flux2", 1), ""), "Remove the object.");
 });
 
@@ -209,6 +214,24 @@ test("transparent canvas becomes the expand mask", () => {
   assert.deepEqual(m.rect, { x: 6, y: 0, width: 4, height: 4 });
   assert.ok(m.bytes.every(v => v === 255));
   assert.equal(IP.transparentMask(new Uint8ClampedArray(w * h * 4).fill(255), w, h), null);
+});
+
+test("flux 2 Klein expand matches Krita's workflow (outpaint LoRA, green, shared latent)", () => {
+  assert.equal(styles.flux2OutpaintLora("flux-2-klein-4b-fp8.safetensors", MODELS), "flux-2-klein-4B-outpaint-lora.safetensors");
+  assert.equal(styles.flux2OutpaintLora("flux-2-klein-base-9b.safetensors", MODELS), "");
+  assert.equal(styles.flux2OutpaintLora("flux2_dev_fp8mixed.safetensors", MODELS), "");
+  const info = Object.assign({}, INFO, { INPAINT_ColorMatch: { input: { required: {} } } });
+  const g = W.buildGenerate(KLEIN(), W.parseModels(info), { prompt: "Fill the green spaces according to the image.", strength: 1,
+    image: "green.png", mask: "m.png", inpaintLora: "flux-2-klein-4B-outpaint-lora.safetensors", seed: 1, batch: 3, width: 480, height: 560 });
+  const id = t => linkTo(g, t);
+  assert.equal(input(g, "LoraLoaderModelOnly", "lora_name"), "flux-2-klein-4B-outpaint-lora.safetensors");
+  assert.deepEqual(input(g, "LoraLoaderModelOnly", "model"), [id("DifferentialDiffusion"), 0]);
+  assert.deepEqual(input(g, "BasicGuider", "model"), [id("LoraLoaderModelOnly"), 0]);
+  assert.equal(nodes(g, "VAEEncode").length, 1);  // one latent: start and reference
+  assert.deepEqual(nodes(g, "ReferenceLatent")[0].inputs.latent, [id("SetLatentNoiseMask"), 0]);
+  assert.deepEqual(input(g, "RepeatLatentBatch", "samples"), [id("SetLatentNoiseMask"), 0]);
+  assert.deepEqual(input(g, "INPAINT_ColorMatch", "target"), [id("VAEDecode"), 0]);
+  assert.deepEqual(input(g, "PreviewImage", "images"), [id("INPAINT_ColorMatch"), 0]);
 });
 
 test("flux 2 reference image can differ from the start image", () => {

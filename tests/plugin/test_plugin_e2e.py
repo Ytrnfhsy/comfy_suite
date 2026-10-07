@@ -245,18 +245,41 @@ def test_expand_into_empty_canvas_without_selection(ps):
 
 
 @pytest.mark.parametrize("cors", ["*"], ids=["cors-any"])
-def test_flux2_modes_use_instructions_and_green_reference(ps):
+def test_flux2_klein_expand_like_krita(ps):
+    """Klein + outpaint LoRA: the area goes green in the start latent, which is also the reference."""
+    h, f, fake = ps
+    f.select_option("#style", "Flux 2 Klein")
+    _select(f, 250, 0, 400, 300)
+    f.select_option("#ws-generate select.mode", "expand")
+    _generate_and_apply(f, "")
+    graph = fake.prompts[-1]
+    kinds = [n["class_type"] for n in graph.values()]
+    assert "DifferentialDiffusion" in kinds and kinds.count("VAEEncode") == 1
+    lora = next(n for n in graph.values() if n["class_type"] == "LoraLoaderModelOnly")
+    assert lora["inputs"]["lora_name"] == "flux-2-klein-4B-outpaint-lora.safetensors"
+    text = next(n["inputs"]["text"] for n in graph.values() if n["class_type"] == "CLIPTextEncode")
+    assert text == "Fill the green spaces according to the image."
+    start = fake.uploads[next(n["inputs"]["image"] for n in graph.values() if n.get("_meta", {}).get("title") == "Canvas")].convert("RGB")
+    assert start.getpixel((start.size[0] - 2, start.size[1] // 2)) == (0, 255, 0)  # the area to expand
+    assert start.getpixel((2, start.size[1] // 2)) == (255, 255, 255)  # context kept
+    assert _pixel(f, 350, 150) == [220, 40, 40, 255]
+    assert _pixel(f, 100, 150) == [255, 255, 255, 255]
+
+
+@pytest.mark.parametrize("cors", ["*"], ids=["cors-any"])
+def test_flux2_without_outpaint_lora_never_paints_green(ps):
+    """Flux 2 Dev has no outpaint LoRA: no green (it would just be copied), the expand instruction instead."""
     h, f, fake = ps
     f.select_option("#style", "Flux 2 Dev")
-    _select(f, 100, 50, 200, 150)
-    f.select_option("#ws-generate select.mode", "fill")
-    _generate_and_apply(f, "a pond")
+    _select(f, 250, 0, 400, 300)
+    f.select_option("#ws-generate select.mode", "expand")
+    _generate_and_apply(f, "a meadow")
     graph = fake.prompts[-1]
     text = next(n["inputs"]["text"] for n in graph.values() if n["class_type"] == "CLIPTextEncode")
-    assert text.startswith("Fill the green spaces according to the image.") and "a pond" in text
-    refs = [fake.uploads[n["inputs"]["image"]] for n in graph.values() if n["class_type"] == "LoadImage" and n.get("_meta", {}).get("title") == "Reference"]
-    ref = refs[0].convert("RGB")
-    assert ref.getpixel((ref.size[0] // 2, ref.size[1] // 2)) == (0, 255, 0)
+    assert text == "Expand the image to fill the empty canvas. a meadow"
+    assert not any(n["class_type"] == "LoraLoaderModelOnly" for n in graph.values())
+    start = fake.uploads[next(n["inputs"]["image"] for n in graph.values() if n.get("_meta", {}).get("title") == "Canvas")].convert("RGB")
+    assert (0, 255, 0) not in [c for _, c in start.getcolors(1 << 20)]
     f.select_option("#ws-generate select.mode", "add")
     _generate_and_apply(f, "a duck")
     text = next(n["inputs"]["text"] for n in fake.prompts[-1].values() if n["class_type"] == "CLIPTextEncode")
